@@ -17,11 +17,11 @@ Firmware for an ESP32-S3 that sits inside a desktop PC and provides:
 
 Provisional wiring (changeable later without rewriting logic):
 
-| Function        | GPIO |
-|-----------------|------|
-| POWER relay     | 4    |
-| RESET relay     | 5    |
-| PC state (PC817)| 6    |
+| Function         | GPIO |
+| ---------------- | ---- |
+| POWER relay      | 4    |
+| RESET relay      | 5    |
+| PC state (PC817) | 6    |
 
 Relays assumed **active-low** (HIGH = off).
 
@@ -68,15 +68,30 @@ All routes require header:
 Authorization: Bearer <your-token>
 ```
 
-| Method | Path                 | Action                          |
-|--------|----------------------|---------------------------------|
-| GET    | `/api/status`        | Status JSON                     |
-| POST   | `/api/pc/power`      | 500 ms power press              |
+| Method | Path                 | Action                             |
+| ------ | -------------------- | ---------------------------------- |
+| GET    | `/api/status`        | Status JSON                        |
+| POST   | `/api/pc/power`      | 500 ms power press                 |
 | POST   | `/api/pc/power/hold` | Long hold (`{"duration_ms":5000}`) |
-| POST   | `/api/pc/reset`      | 500 ms reset                    |
-| POST   | `/api/pc/release`    | Emergency release               |
-| POST   | `/api/hid/key`       | `{"key":"enter"}` etc.          |
+| POST   | `/api/pc/reset`      | 500 ms reset                       |
+| POST   | `/api/pc/release`    | Emergency release                  |
+| POST   | `/api/hid/key`       | `{"key":"enter"}` etc.             |
 
 ## Build status
 
 Scaffolded for bring-up. Next: install ESP-IDF on this Mac, flash a blink/safe-boot build, then dry-test relays before any motherboard connection.
+
+## License
+
+ESP32-PC-controller — including **all past and present commits** in this repository — is
+licensed under the [GNU General Public License v3.0](LICENSE), with
+[Additional Terms](NOTICE) under GPL §7.
+
+In short:
+
+- Derivative works and redistributed copies must remain open source under GPL-3.0.
+- Products built with LumosOS must give clear front-page credit that LumosOS was used to build them (see `NOTICE`).
+
+```
+Copyright (C) 2026 Shivansh Tyagi
+```
