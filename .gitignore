@@ -1,0 +1,24 @@
+# ESP-IDF build
+build/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+managed_components/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~
+
+# Secrets — never commit real credentials
+main/secrets.h
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/

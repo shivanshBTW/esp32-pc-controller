@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "relay_controller.c"
+        "pc_controller.c"
+        "pc_state.c"
+        "hid_controller.c"
+        "network.c"
+        "local_api.c"
+        "matter_controller.c"
+        "diagnostics.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        esp_http_server
+        esp_timer
+        driver
+        json
+)
