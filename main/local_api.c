@@ -2,13 +2,18 @@
 #include "configuration.h"
 #include "diagnostics.h"
 #include "hid_controller.h"
+#include "mdns_service.h"
 #include "network.h"
+#include "nvs_prefs.h"
+#include "ota_http.h"
 #include "pc_controller.h"
 #include "relay_controller.h"
+#include "web_ui.h"
 
 #include "cJSON.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_system.h"
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -40,11 +45,18 @@ static bool authorize(httpd_req_t *req)
     if (httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof(hdr)) != ESP_OK) {
         return false;
     }
-    const char *prefix = "Bearer ";
-    if (strncmp(hdr, prefix, strlen(prefix)) != 0) {
+    if (strncmp(hdr, "Bearer ", 7) != 0) {
         return false;
     }
-    return constant_time_eq(hdr + strlen(prefix), API_TOKEN);
+    return constant_time_eq(hdr + 7, nvs_prefs_get()->api_token);
+}
+
+static bool authorize_or_setup(httpd_req_t *req)
+{
+    if (network_is_setup_mode()) {
+        return true;
+    }
+    return authorize(req);
 }
 
 static esp_err_t reject_unauthorized(httpd_req_t *req)
@@ -78,27 +90,327 @@ static esp_err_t send_result(httpd_req_t *req, esp_err_t err)
     return send_json(req, root);
 }
 
+static int recv_body(httpd_req_t *req, char *buf, size_t buflen)
+{
+    int total = 0;
+    int remaining = req->content_len;
+    if (remaining <= 0 || remaining >= (int)buflen) {
+        remaining = (int)buflen - 1;
+    }
+    while (total < remaining) {
+        int r = httpd_req_recv(req, buf + total, remaining - total);
+        if (r <= 0) {
+            break;
+        }
+        total += r;
+    }
+    buf[total] = '\0';
+    return total;
+}
+
 static esp_err_t handle_status(httpd_req_t *req)
 {
-    if (!authorize(req)) {
+    const bool setup = network_is_setup_mode();
+    if (!setup && !authorize(req)) {
         return reject_unauthorized(req);
     }
 
+    const waketype_settings_t *s = nvs_prefs_get();
     cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "product", PRODUCT_NAME);
     cJSON_AddStringToObject(root, "firmware", diagnostics_firmware_version());
+    cJSON_AddNumberToObject(root, "schema", CONFIG_SCHEMA_VERSION);
     cJSON_AddNumberToObject(root, "uptime_sec", diagnostics_uptime_sec());
     cJSON_AddStringToObject(root, "last_command", diagnostics_last_command());
     cJSON_AddStringToObject(root, "pc_state",
                             pc_state_to_string(pc_controller_get_pc_state()));
-    cJSON_AddBoolToObject(root, "wifi_connected", network_is_connected());
+    cJSON_AddStringToObject(root, "wifi_mode", network_mode_string());
+    cJSON_AddBoolToObject(root, "wifi_connected", network_is_sta_connected());
+    cJSON_AddBoolToObject(root, "setup_mode", setup);
     cJSON_AddStringToObject(root, "ip", network_ip_string());
+    cJSON_AddStringToObject(root, "hostname", s->hostname);
     cJSON_AddNumberToObject(root, "rssi", network_rssi());
     cJSON_AddBoolToObject(root, "relay_busy", relay_controller_is_busy());
     cJSON_AddBoolToObject(root, "power_relay_active", relay_controller_power_active());
     cJSON_AddBoolToObject(root, "reset_relay_active", relay_controller_reset_active());
+    cJSON_AddBoolToObject(root, "local_lock", pc_controller_is_local_lock());
     cJSON_AddBoolToObject(root, "hid_ready", hid_controller_is_ready());
     cJSON_AddStringToObject(root, "matter", "stub");
+    cJSON_AddNumberToObject(root, "heap_free", (double)esp_get_free_heap_size());
+    cJSON_AddNumberToObject(root, "heap_min", (double)esp_get_minimum_free_heap_size());
+    if (setup) {
+        cJSON_AddStringToObject(root, "api_token", s->api_token);
+    }
+    mdns_service_update_txt();
     return send_json(req, root);
+}
+
+static esp_err_t handle_wifi_scan(httpd_req_t *req)
+{
+    if (!authorize_or_setup(req)) {
+        return reject_unauthorized(req);
+    }
+    wifi_scan_ap_t *list = NULL;
+    size_t count = 0;
+    esp_err_t err = network_scan(&list, &count);
+    if (err != ESP_OK) {
+        return send_result(req, err);
+    }
+    cJSON *root = cJSON_CreateObject();
+    cJSON *aps = cJSON_AddArrayToObject(root, "aps");
+    for (size_t i = 0; i < count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "ssid", list[i].ssid);
+        cJSON_AddNumberToObject(item, "rssi", list[i].rssi);
+        cJSON_AddNumberToObject(item, "authmode", list[i].authmode);
+        cJSON_AddItemToArray(aps, item);
+    }
+    free(list);
+    return send_json(req, root);
+}
+
+static esp_err_t handle_wifi_connect(httpd_req_t *req)
+{
+    if (!authorize_or_setup(req)) {
+        return reject_unauthorized(req);
+    }
+    char buf[256];
+    if (recv_body(req, buf, sizeof(buf)) <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"error\":\"missing body\"}");
+    }
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"error\":\"invalid json\"}");
+    }
+    const cJSON *ssid = cJSON_GetObjectItem(json, "ssid");
+    const cJSON *pass = cJSON_GetObjectItem(json, "password");
+    const char *ssid_s = cJSON_IsString(ssid) ? ssid->valuestring : NULL;
+    const char *pass_s = cJSON_IsString(pass) ? pass->valuestring : "";
+    esp_err_t err = network_save_and_connect(ssid_s, pass_s);
+    cJSON_Delete(json);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", err == ESP_OK);
+    cJSON_AddStringToObject(root, "error", esp_err_to_name(err));
+    if (err == ESP_OK) {
+        cJSON_AddStringToObject(root, "api_token", nvs_prefs_get()->api_token);
+    } else {
+        httpd_resp_set_status(req, "409 Conflict");
+    }
+    return send_json(req, root);
+}
+
+static esp_err_t handle_settings_get(httpd_req_t *req)
+{
+    /* Setup SoftAP: allow read for captive UI. STA: require bearer token. */
+    if (!network_is_setup_mode() && !authorize(req)) {
+        return reject_unauthorized(req);
+    }
+
+    const waketype_settings_t *s = nvs_prefs_get();
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "hostname", s->hostname);
+    cJSON_AddBoolToObject(root, "wifi_use_static", s->wifi_use_static);
+    cJSON_AddStringToObject(root, "wifi_ip", s->wifi_ip);
+    cJSON_AddStringToObject(root, "wifi_gateway", s->wifi_gateway);
+    cJSON_AddStringToObject(root, "wifi_netmask", s->wifi_netmask);
+    cJSON_AddStringToObject(root, "wifi_dns1", s->wifi_dns1);
+    cJSON_AddStringToObject(root, "wifi_dns2", s->wifi_dns2);
+    cJSON_AddStringToObject(root, "wifi_ssid", s->wifi_ssid);
+    cJSON_AddBoolToObject(root, "local_lock", s->local_lock);
+    cJSON_AddBoolToObject(root, "local_lock_blocks_api", s->local_lock_blocks_api);
+    cJSON_AddNumberToObject(root, "power_press_ms", s->power_press_ms);
+    cJSON_AddNumberToObject(root, "reset_press_ms", s->reset_press_ms);
+    cJSON_AddNumberToObject(root, "default_long_press_ms", s->default_long_press_ms);
+    cJSON_AddNumberToObject(root, "max_relay_hold_ms", MAX_RELAY_HOLD_MS);
+    return send_json(req, root);
+}
+
+static void copy_json_str(const cJSON *obj, const char *key, char *dst, size_t dst_len)
+{
+    const cJSON *v = cJSON_GetObjectItem(obj, key);
+    if (cJSON_IsString(v) && v->valuestring) {
+        strncpy(dst, v->valuestring, dst_len - 1);
+        dst[dst_len - 1] = '\0';
+    }
+}
+
+static esp_err_t handle_settings_post(httpd_req_t *req)
+{
+    if (!authorize(req)) {
+        return reject_unauthorized(req);
+    }
+    char buf[1024];
+    if (recv_body(req, buf, sizeof(buf)) <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"error\":\"missing body\"}");
+    }
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"error\":\"invalid json\"}");
+    }
+
+    waketype_settings_t *s = nvs_prefs_mutable();
+    copy_json_str(json, "hostname", s->hostname, sizeof(s->hostname));
+    copy_json_str(json, "wifi_ip", s->wifi_ip, sizeof(s->wifi_ip));
+    copy_json_str(json, "wifi_gateway", s->wifi_gateway, sizeof(s->wifi_gateway));
+    copy_json_str(json, "wifi_netmask", s->wifi_netmask, sizeof(s->wifi_netmask));
+    copy_json_str(json, "wifi_dns1", s->wifi_dns1, sizeof(s->wifi_dns1));
+    copy_json_str(json, "wifi_dns2", s->wifi_dns2, sizeof(s->wifi_dns2));
+    copy_json_str(json, "api_token", s->api_token, sizeof(s->api_token));
+
+    const cJSON *b;
+    b = cJSON_GetObjectItem(json, "wifi_use_static");
+    if (cJSON_IsBool(b)) {
+        s->wifi_use_static = cJSON_IsTrue(b);
+    }
+    b = cJSON_GetObjectItem(json, "local_lock");
+    if (cJSON_IsBool(b)) {
+        s->local_lock = cJSON_IsTrue(b);
+    }
+    b = cJSON_GetObjectItem(json, "local_lock_blocks_api");
+    if (cJSON_IsBool(b)) {
+        s->local_lock_blocks_api = cJSON_IsTrue(b);
+    }
+
+    const cJSON *n;
+    n = cJSON_GetObjectItem(json, "power_press_ms");
+    if (cJSON_IsNumber(n) && n->valuedouble > 0) {
+        s->power_press_ms = (uint32_t)n->valuedouble;
+    }
+    n = cJSON_GetObjectItem(json, "reset_press_ms");
+    if (cJSON_IsNumber(n) && n->valuedouble > 0) {
+        s->reset_press_ms = (uint32_t)n->valuedouble;
+    }
+    n = cJSON_GetObjectItem(json, "default_long_press_ms");
+    if (cJSON_IsNumber(n) && n->valuedouble > 0) {
+        uint32_t v = (uint32_t)n->valuedouble;
+        if (v > MAX_RELAY_HOLD_MS) {
+            v = MAX_RELAY_HOLD_MS;
+        }
+        s->default_long_press_ms = v;
+    }
+    cJSON_Delete(json);
+
+    esp_err_t err = nvs_prefs_save();
+    if (err == ESP_OK) {
+        network_apply_ip_settings();
+        mdns_service_start();
+    }
+    return send_result(req, err);
+}
+
+static esp_err_t handle_config_get(httpd_req_t *req)
+{
+    if (!authorize(req)) {
+        return reject_unauthorized(req);
+    }
+    const waketype_settings_t *s = nvs_prefs_get();
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "product", PRODUCT_NAME);
+    cJSON_AddNumberToObject(root, "schema", CONFIG_SCHEMA_VERSION);
+    cJSON_AddStringToObject(root, "hostname", s->hostname);
+    cJSON_AddStringToObject(root, "wifi_ssid", s->wifi_ssid);
+    cJSON_AddBoolToObject(root, "wifi_use_static", s->wifi_use_static);
+    cJSON_AddStringToObject(root, "wifi_ip", s->wifi_ip);
+    cJSON_AddStringToObject(root, "wifi_gateway", s->wifi_gateway);
+    cJSON_AddStringToObject(root, "wifi_netmask", s->wifi_netmask);
+    cJSON_AddStringToObject(root, "wifi_dns1", s->wifi_dns1);
+    cJSON_AddStringToObject(root, "wifi_dns2", s->wifi_dns2);
+    cJSON_AddBoolToObject(root, "local_lock", s->local_lock);
+    cJSON_AddBoolToObject(root, "local_lock_blocks_api", s->local_lock_blocks_api);
+    cJSON_AddNumberToObject(root, "power_press_ms", s->power_press_ms);
+    cJSON_AddNumberToObject(root, "reset_press_ms", s->reset_press_ms);
+    cJSON_AddNumberToObject(root, "default_long_press_ms", s->default_long_press_ms);
+    /* secrets omitted by default */
+    cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
+    cJSON_AddBoolToObject(root, "api_token_set", s->api_token[0] != '\0');
+    return send_json(req, root);
+}
+
+static esp_err_t handle_config_post(httpd_req_t *req)
+{
+    if (!authorize(req)) {
+        return reject_unauthorized(req);
+    }
+    char buf[2048];
+    if (recv_body(req, buf, sizeof(buf)) <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"error\":\"missing body\"}");
+    }
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "{\"error\":\"invalid json\"}");
+    }
+
+    pc_controller_release_all();
+
+    waketype_settings_t *s = nvs_prefs_mutable();
+    copy_json_str(json, "hostname", s->hostname, sizeof(s->hostname));
+    copy_json_str(json, "wifi_ssid", s->wifi_ssid, sizeof(s->wifi_ssid));
+    copy_json_str(json, "wifi_ip", s->wifi_ip, sizeof(s->wifi_ip));
+    copy_json_str(json, "wifi_gateway", s->wifi_gateway, sizeof(s->wifi_gateway));
+    copy_json_str(json, "wifi_netmask", s->wifi_netmask, sizeof(s->wifi_netmask));
+    copy_json_str(json, "wifi_dns1", s->wifi_dns1, sizeof(s->wifi_dns1));
+    copy_json_str(json, "wifi_dns2", s->wifi_dns2, sizeof(s->wifi_dns2));
+
+    const cJSON *inc = cJSON_GetObjectItem(json, "include_secrets");
+    if (cJSON_IsTrue(inc)) {
+        copy_json_str(json, "wifi_password", s->wifi_password, sizeof(s->wifi_password));
+        copy_json_str(json, "api_token", s->api_token, sizeof(s->api_token));
+    }
+
+    const cJSON *clear_static = cJSON_GetObjectItem(json, "clear_static_ip");
+    if (!cJSON_IsFalse(clear_static)) {
+        /* default: clear static IP on import (cloning) */
+        s->wifi_use_static = false;
+        s->wifi_ip[0] = '\0';
+        s->wifi_gateway[0] = '\0';
+        s->wifi_dns1[0] = '\0';
+        s->wifi_dns2[0] = '\0';
+    } else {
+        const cJSON *b = cJSON_GetObjectItem(json, "wifi_use_static");
+        if (cJSON_IsBool(b)) {
+            s->wifi_use_static = cJSON_IsTrue(b);
+        }
+    }
+
+    const cJSON *b = cJSON_GetObjectItem(json, "local_lock");
+    if (cJSON_IsBool(b)) {
+        s->local_lock = cJSON_IsTrue(b);
+    }
+    b = cJSON_GetObjectItem(json, "local_lock_blocks_api");
+    if (cJSON_IsBool(b)) {
+        s->local_lock_blocks_api = cJSON_IsTrue(b);
+    }
+
+    const cJSON *n = cJSON_GetObjectItem(json, "power_press_ms");
+    if (cJSON_IsNumber(n) && n->valuedouble > 0) {
+        s->power_press_ms = (uint32_t)n->valuedouble;
+    }
+    n = cJSON_GetObjectItem(json, "reset_press_ms");
+    if (cJSON_IsNumber(n) && n->valuedouble > 0) {
+        s->reset_press_ms = (uint32_t)n->valuedouble;
+    }
+    n = cJSON_GetObjectItem(json, "default_long_press_ms");
+    if (cJSON_IsNumber(n) && n->valuedouble > 0) {
+        uint32_t v = (uint32_t)n->valuedouble;
+        if (v > MAX_RELAY_HOLD_MS) {
+            v = MAX_RELAY_HOLD_MS;
+        }
+        s->default_long_press_ms = v;
+    }
+    cJSON_Delete(json);
+
+    esp_err_t err = nvs_prefs_save();
+    if (err == ESP_OK) {
+        network_apply_ip_settings();
+    }
+    return send_result(req, err);
 }
 
 static esp_err_t handle_power(httpd_req_t *req)
@@ -106,7 +418,7 @@ static esp_err_t handle_power(httpd_req_t *req)
     if (!authorize(req)) {
         return reject_unauthorized(req);
     }
-    return send_result(req, pc_controller_power_press());
+    return send_result(req, pc_controller_power_press(PC_CMD_SOURCE_LOCAL_API));
 }
 
 static esp_err_t handle_power_hold(httpd_req_t *req)
@@ -114,12 +426,9 @@ static esp_err_t handle_power_hold(httpd_req_t *req)
     if (!authorize(req)) {
         return reject_unauthorized(req);
     }
-
     char buf[128];
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    uint32_t duration = DEFAULT_LONG_PRESS_MS;
-    if (received > 0) {
-        buf[received] = '\0';
+    uint32_t duration = 0;
+    if (recv_body(req, buf, sizeof(buf)) > 0) {
         cJSON *json = cJSON_Parse(buf);
         if (json) {
             const cJSON *ms = cJSON_GetObjectItem(json, "duration_ms");
@@ -129,7 +438,7 @@ static esp_err_t handle_power_hold(httpd_req_t *req)
             cJSON_Delete(json);
         }
     }
-    return send_result(req, pc_controller_power_hold(duration));
+    return send_result(req, pc_controller_power_hold(duration, PC_CMD_SOURCE_LOCAL_API));
 }
 
 static esp_err_t handle_reset(httpd_req_t *req)
@@ -137,7 +446,7 @@ static esp_err_t handle_reset(httpd_req_t *req)
     if (!authorize(req)) {
         return reject_unauthorized(req);
     }
-    return send_result(req, pc_controller_reset_press());
+    return send_result(req, pc_controller_reset_press(PC_CMD_SOURCE_LOCAL_API));
 }
 
 static esp_err_t handle_release(httpd_req_t *req)
@@ -183,15 +492,15 @@ static esp_err_t handle_hid_key(httpd_req_t *req)
     if (!authorize(req)) {
         return reject_unauthorized(req);
     }
+    if (pc_controller_is_local_lock() && nvs_prefs_get()->local_lock_blocks_api) {
+        return send_result(req, ESP_ERR_INVALID_STATE);
+    }
 
     char buf[128];
-    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
+    if (recv_body(req, buf, sizeof(buf)) <= 0) {
         httpd_resp_set_status(req, "400 Bad Request");
         return httpd_resp_sendstr(req, "{\"error\":\"missing body\"}");
     }
-    buf[received] = '\0';
-
     cJSON *json = cJSON_Parse(buf);
     if (!json) {
         httpd_resp_set_status(req, "400 Bad Request");
@@ -200,7 +509,6 @@ static esp_err_t handle_hid_key(httpd_req_t *req)
     const cJSON *key = cJSON_GetObjectItem(json, "key");
     hid_command_t cmd = parse_hid_key(cJSON_IsString(key) ? key->valuestring : NULL);
     cJSON_Delete(json);
-
     if ((int)cmd < 0) {
         httpd_resp_set_status(req, "400 Bad Request");
         return httpd_resp_sendstr(req, "{\"error\":\"unknown key\"}");
@@ -210,14 +518,11 @@ static esp_err_t handle_hid_key(httpd_req_t *req)
 
 esp_err_t local_api_start(void)
 {
-    if (!network_is_connected()) {
-        ESP_LOGW(TAG, "Skipping API — no Wi-Fi");
-        return ESP_ERR_INVALID_STATE;
-    }
-
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = API_HTTP_PORT;
     config.lru_purge_enable = true;
+    config.max_uri_handlers = 24;
+    config.stack_size = 8192;
 
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) {
@@ -225,18 +530,26 @@ esp_err_t local_api_start(void)
     }
 
     const httpd_uri_t routes[] = {
-        {.uri = "/api/status", .method = HTTP_GET, .handler = handle_status},
-        {.uri = "/api/pc/power", .method = HTTP_POST, .handler = handle_power},
-        {.uri = "/api/pc/power/hold", .method = HTTP_POST, .handler = handle_power_hold},
-        {.uri = "/api/pc/reset", .method = HTTP_POST, .handler = handle_reset},
-        {.uri = "/api/pc/release", .method = HTTP_POST, .handler = handle_release},
-        {.uri = "/api/hid/key", .method = HTTP_POST, .handler = handle_hid_key},
+        {.uri = "/api/v1/status", .method = HTTP_GET, .handler = handle_status},
+        {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = handle_wifi_scan},
+        {.uri = "/api/v1/wifi/connect", .method = HTTP_POST, .handler = handle_wifi_connect},
+        {.uri = "/api/v1/settings", .method = HTTP_GET, .handler = handle_settings_get},
+        {.uri = "/api/v1/settings", .method = HTTP_POST, .handler = handle_settings_post},
+        {.uri = "/api/v1/config", .method = HTTP_GET, .handler = handle_config_get},
+        {.uri = "/api/v1/config", .method = HTTP_POST, .handler = handle_config_post},
+        {.uri = "/api/v1/pc/power", .method = HTTP_POST, .handler = handle_power},
+        {.uri = "/api/v1/pc/power/hold", .method = HTTP_POST, .handler = handle_power_hold},
+        {.uri = "/api/v1/pc/reset", .method = HTTP_POST, .handler = handle_reset},
+        {.uri = "/api/v1/pc/release", .method = HTTP_POST, .handler = handle_release},
+        {.uri = "/api/v1/hid/key", .method = HTTP_POST, .handler = handle_hid_key},
     };
-
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         httpd_register_uri_handler(s_server, &routes[i]);
     }
 
-    ESP_LOGI(TAG, "Local API listening on http://%s/api/*", network_ip_string());
+    web_ui_register(s_server);
+    ota_http_register(s_server);
+
+    ESP_LOGI(TAG, "HTTP on http://%s/ (mode=%s)", network_ip_string(), network_mode_string());
     return ESP_OK;
 }

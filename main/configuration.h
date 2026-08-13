@@ -8,39 +8,31 @@
 extern "C" {
 #endif
 
-/* Firmware identity */
-#define FIRMWARE_VERSION "0.1.0-dev"
+#define PRODUCT_NAME              "WakeType"
+#define FIRMWARE_VERSION          "0.2.0-dev"
+#define CONFIG_SCHEMA_VERSION     1
 
-/* GPIO map — provisional for dual USB-C ESP32-S3-WROOM-1-N16R8 DevKit.
- * Change via menuconfig (idf.py menuconfig) if your wiring differs. */
+#define AP_SSID_DEFAULT           "WakeType-Setup"
+#define HOSTNAME_DEFAULT          "waketype"
+#define MDNS_SERVICE_TYPE         "_waketype"
+#define MDNS_SERVICE_PROTO        "_tcp"
+#define API_HTTP_PORT             80
+
 #define POWER_RELAY_GPIO          CONFIG_PC_POWER_RELAY_GPIO
 #define RESET_RELAY_GPIO          CONFIG_PC_RESET_RELAY_GPIO
 #define PC_STATE_GPIO             CONFIG_PC_STATE_GPIO
-
 #define RELAY_ACTIVE_LOW          CONFIG_PC_RELAY_ACTIVE_LOW
 
-#define POWER_PRESS_MS            CONFIG_PC_POWER_PRESS_MS
-#define RESET_PRESS_MS            CONFIG_PC_RESET_PRESS_MS
-#define DEFAULT_LONG_PRESS_MS     CONFIG_PC_DEFAULT_LONG_PRESS_MS
+#define POWER_PRESS_MS_DEFAULT    CONFIG_PC_POWER_PRESS_MS
+#define RESET_PRESS_MS_DEFAULT    CONFIG_PC_RESET_PRESS_MS
+#define DEFAULT_LONG_PRESS_MS_DEFAULT CONFIG_PC_DEFAULT_LONG_PRESS_MS
 #define MAX_RELAY_HOLD_MS         CONFIG_PC_MAX_RELAY_HOLD_MS
-
-/* Watchdog fires slightly above the absolute max hold. */
 #define RELAY_WATCHDOG_MS         (MAX_RELAY_HOLD_MS + 500)
 
-/* Wi-Fi / API — from menuconfig; empty SSID means "skip connect". */
-#define WIFI_SSID                 CONFIG_PC_WIFI_SSID
-#define WIFI_PASSWORD             CONFIG_PC_WIFI_PASSWORD
-#define API_TOKEN                 CONFIG_PC_API_TOKEN
-#define API_HTTP_PORT             80
-
-/* PC817 open-collector: active LED pulls GPIO LOW when using INPUT_PULLUP. */
+#define WIFI_STA_FAIL_BEFORE_AP   10
 #define PC_STATE_ACTIVE_LEVEL     0
-
-/* Sleep/blink detection thresholds (ms) — for later refinement. */
 #define PC_STATE_SAMPLE_MS        50
 #define PC_STATE_STEADY_MS        1500
-#define PC_STATE_BLINK_MIN_MS     200
-#define PC_STATE_BLINK_MAX_MS     2000
 
 static inline int relay_active_level(void)
 {

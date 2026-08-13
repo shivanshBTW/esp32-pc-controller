@@ -1,5 +1,8 @@
 #include "network.h"
+#include "captive_dns.h"
 #include "configuration.h"
+#include "mdns_service.h"
+#include "nvs_prefs.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -7,105 +10,239 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
-#include "nvs_flash.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char *TAG = "net";
 
 #define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
-#define WIFI_MAX_RETRY     10
 
-static EventGroupHandle_t s_wifi_events;
+static EventGroupHandle_t s_events;
+static esp_netif_t *s_sta_netif;
+static esp_netif_t *s_ap_netif;
+static bool s_sta_connected;
+static bool s_ap_active;
+static bool s_want_sta;
 static int s_retry;
-static bool s_connected;
 static char s_ip[16] = "0.0.0.0";
 static int s_rssi;
 
-static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+static void apply_hostname(void)
+{
+    if (!s_sta_netif) {
+        return;
+    }
+    const char *host = nvs_prefs_get()->hostname;
+    if (!host || host[0] == '\0') {
+        host = HOSTNAME_DEFAULT;
+    }
+    esp_netif_set_hostname(s_sta_netif, host);
+    ESP_LOGI(TAG, "DHCP hostname: %s", host);
+}
+
+static esp_err_t apply_static_or_dhcp(void)
+{
+    if (!s_sta_netif) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const waketype_settings_t *s = nvs_prefs_get();
+    if (!s->wifi_use_static) {
+        esp_err_t err = esp_netif_dhcpc_start(s_sta_netif);
+        if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+            return err;
+        }
+        ESP_LOGI(TAG, "STA IP mode: DHCP");
+        return ESP_OK;
+    }
+    if (s->wifi_ip[0] == '\0' || s->wifi_gateway[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_netif_dhcpc_stop(s_sta_netif);
+    esp_netif_ip_info_t ip_info = {0};
+    const char *mask = s->wifi_netmask[0] ? s->wifi_netmask : "255.255.255.0";
+    if (esp_netif_str_to_ip4(s->wifi_ip, &ip_info.ip) != ESP_OK ||
+        esp_netif_str_to_ip4(s->wifi_gateway, &ip_info.gw) != ESP_OK ||
+        esp_netif_str_to_ip4(mask, &ip_info.netmask) != ESP_OK) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t err = esp_netif_set_ip_info(s_sta_netif, &ip_info);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const char *dns1 = s->wifi_dns1[0] ? s->wifi_dns1 : s->wifi_gateway;
+    esp_netif_dns_info_t dns = {0};
+    dns.ip.type = ESP_IPADDR_TYPE_V4;
+    if (esp_netif_str_to_ip4(dns1, &dns.ip.u_addr.ip4) == ESP_OK) {
+        esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns);
+    }
+    if (s->wifi_dns2[0]) {
+        if (esp_netif_str_to_ip4(s->wifi_dns2, &dns.ip.u_addr.ip4) == ESP_OK) {
+            esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_BACKUP, &dns);
+        }
+    }
+    ESP_LOGI(TAG, "STA IP mode: static %s", s->wifi_ip);
+    return ESP_OK;
+}
+
+static esp_err_t start_ap(void)
+{
+    wifi_config_t ap = {0};
+    strncpy((char *)ap.ap.ssid, AP_SSID_DEFAULT, sizeof(ap.ap.ssid) - 1);
+    ap.ap.ssid_len = strlen(AP_SSID_DEFAULT);
+    ap.ap.channel = 1;
+    ap.ap.max_connection = 4;
+    ap.ap.authmode = WIFI_AUTH_OPEN;
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+
+    s_ap_active = true;
+    s_want_sta = false;
+    s_sta_connected = false;
+    strncpy(s_ip, "192.168.4.1", sizeof(s_ip) - 1);
+
+    esp_netif_ip_info_t ip_info;
+    if (s_ap_netif && esp_netif_get_ip_info(s_ap_netif, &ip_info) == ESP_OK) {
+        captive_dns_start(ip_info.ip.addr);
+        snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ip_info.ip));
+    } else {
+        captive_dns_start(esp_netif_htonl(ESP_IP4TOADDR(192, 168, 4, 1)));
+    }
+
+    ESP_LOGW(TAG, "SoftAP '%s' at http://%s — configure Wi‑Fi", AP_SSID_DEFAULT, s_ip);
+    return ESP_OK;
+}
+
+static esp_err_t start_sta(const char *ssid, const char *password)
+{
+    captive_dns_stop();
+    s_ap_active = false;
+    s_want_sta = true;
+    s_retry = 0;
+    xEventGroupClearBits(s_events, WIFI_CONNECTED_BIT);
+
+    wifi_config_t sta = {0};
+    strncpy((char *)sta.sta.ssid, ssid, sizeof(sta.sta.ssid) - 1);
+    if (password) {
+        strncpy((char *)sta.sta.password, password, sizeof(sta.sta.password) - 1);
+    }
+    sta.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+
+    apply_hostname();
+    ESP_ERROR_CHECK(apply_static_or_dhcp());
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    ESP_LOGI(TAG, "Connecting STA to '%s'...", ssid);
+    return ESP_OK;
+}
+
+static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     (void)base;
+    (void)data;
     if (id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
-        s_connected = false;
-        if (s_retry < WIFI_MAX_RETRY) {
+        if (s_want_sta) {
             esp_wifi_connect();
-            s_retry++;
-            ESP_LOGW(TAG, "Wi-Fi reconnect attempt %d", s_retry);
-        } else {
-            xEventGroupSetBits(s_wifi_events, WIFI_FAIL_BIT);
-            ESP_LOGE(TAG, "Wi-Fi failed — relays stay released; physical buttons still work");
         }
+    } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
+        s_sta_connected = false;
+        if (!s_want_sta) {
+            return;
+        }
+        if (s_retry < WIFI_STA_FAIL_BEFORE_AP) {
+            s_retry++;
+            ESP_LOGW(TAG, "STA reconnect %d/%d", s_retry, WIFI_STA_FAIL_BEFORE_AP);
+            esp_wifi_connect();
+        } else {
+            ESP_LOGE(TAG, "STA failed — opening setup SoftAP (relays stay released)");
+            start_ap();
+        }
+    } else if (id == WIFI_EVENT_AP_START) {
+        s_ap_active = true;
+    } else if (id == WIFI_EVENT_AP_STOP) {
+        s_ap_active = false;
     }
 }
 
-static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     (void)base;
-    if (id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
-        snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&event->ip_info.ip));
-        s_retry = 0;
-        s_connected = true;
-        wifi_ap_record_t ap;
-        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-            s_rssi = ap.rssi;
-        }
-        xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
-        ESP_LOGI(TAG, "Wi-Fi connected, IP %s", s_ip);
+    if (id != IP_EVENT_STA_GOT_IP) {
+        return;
     }
+    ip_event_got_ip_t *event = data;
+    snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&event->ip_info.ip));
+    s_retry = 0;
+    s_sta_connected = true;
+    s_ap_active = false;
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        s_rssi = ap.rssi;
+    }
+    xEventGroupSetBits(s_events, WIFI_CONNECTED_BIT);
+    ESP_LOGI(TAG, "STA connected, IP %s", s_ip);
+    mdns_service_start();
 }
 
 esp_err_t network_init(void)
 {
-    if (WIFI_SSID[0] == '\0') {
-        ESP_LOGW(TAG, "Wi-Fi SSID not configured — skipping network (set via menuconfig)");
-        return ESP_OK;
-    }
-
-    s_wifi_events = xEventGroupCreate();
-    if (!s_wifi_events) {
+    s_events = xEventGroupCreate();
+    if (!s_events) {
         return ESP_ERR_NO_MEM;
     }
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    s_sta_netif = esp_netif_create_default_wifi_sta();
+    s_ap_netif = esp_netif_create_default_wifi_ap();
+    apply_hostname();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_ip, NULL));
 
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi_event, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_ip_event, NULL));
-
-    wifi_config_t wifi_config = {0};
-    strncpy((char *)wifi_config.sta.ssid, WIFI_SSID, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char *)wifi_config.sta.password, WIFI_PASSWORD, sizeof(wifi_config.sta.password) - 1);
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "Connecting to Wi-Fi SSID '%s'...", WIFI_SSID);
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_events,
-                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                           pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(30000));
-    if (bits & WIFI_CONNECTED_BIT) {
+    const waketype_settings_t *s = nvs_prefs_get();
+    if (s->wifi_ssid[0] != '\0') {
+        esp_err_t err = start_sta(s->wifi_ssid, s->wifi_password);
+        if (err != ESP_OK) {
+            return start_ap();
+        }
+        EventBits_t bits = xEventGroupWaitBits(s_events, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE,
+                                               pdMS_TO_TICKS(25000));
+        if (!(bits & WIFI_CONNECTED_BIT)) {
+            ESP_LOGW(TAG, "STA timeout — SoftAP setup");
+            return start_ap();
+        }
         return ESP_OK;
     }
-    return ESP_ERR_TIMEOUT;
+    return start_ap();
 }
 
-bool network_is_connected(void)
+bool network_is_sta_connected(void)
 {
-    return s_connected;
+    return s_sta_connected;
+}
+
+bool network_is_ap_active(void)
+{
+    return s_ap_active;
+}
+
+bool network_is_setup_mode(void)
+{
+    return s_ap_active && !s_sta_connected;
 }
 
 const char *network_ip_string(void)
@@ -113,9 +250,20 @@ const char *network_ip_string(void)
     return s_ip;
 }
 
+const char *network_mode_string(void)
+{
+    if (s_sta_connected) {
+        return "sta";
+    }
+    if (s_ap_active) {
+        return "ap";
+    }
+    return "down";
+}
+
 int network_rssi(void)
 {
-    if (!s_connected) {
+    if (!s_sta_connected) {
         return 0;
     }
     wifi_ap_record_t ap;
@@ -123,4 +271,108 @@ int network_rssi(void)
         s_rssi = ap.rssi;
     }
     return s_rssi;
+}
+
+esp_err_t network_apply_ip_settings(void)
+{
+    apply_hostname();
+    return apply_static_or_dhcp();
+}
+
+esp_err_t network_save_and_connect(const char *ssid, const char *password)
+{
+    if (!ssid || ssid[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    waketype_settings_t *s = nvs_prefs_mutable();
+    memset(s->wifi_ssid, 0, sizeof(s->wifi_ssid));
+    memset(s->wifi_password, 0, sizeof(s->wifi_password));
+    strncpy(s->wifi_ssid, ssid, sizeof(s->wifi_ssid) - 1);
+    if (password) {
+        strncpy(s->wifi_password, password, sizeof(s->wifi_password) - 1);
+    }
+    esp_err_t err = nvs_prefs_save();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_retry = 0;
+    s_want_sta = true;
+    captive_dns_stop();
+
+    wifi_config_t sta = {0};
+    strncpy((char *)sta.sta.ssid, ssid, sizeof(sta.sta.ssid) - 1);
+    if (password) {
+        strncpy((char *)sta.sta.password, password, sizeof(sta.sta.password) - 1);
+    }
+    sta.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+
+    apply_hostname();
+    apply_static_or_dhcp();
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    s_ap_active = false;
+    esp_wifi_connect();
+    ESP_LOGI(TAG, "Saved Wi‑Fi '%s' — connecting", ssid);
+    return ESP_OK;
+}
+
+esp_err_t network_scan(wifi_scan_ap_t **out_list, size_t *out_count)
+{
+    if (!out_list || !out_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_list = NULL;
+    *out_count = 0;
+
+    wifi_mode_t mode;
+    esp_wifi_get_mode(&mode);
+    if (mode == WIFI_MODE_AP) {
+        esp_wifi_set_mode(WIFI_MODE_APSTA);
+    }
+
+    wifi_scan_config_t scan = {
+        .show_hidden = false,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+    };
+    esp_err_t err = esp_wifi_scan_start(&scan, true);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    uint16_t ap_num = 0;
+    esp_wifi_scan_get_ap_num(&ap_num);
+    if (ap_num == 0) {
+        return ESP_OK;
+    }
+    if (ap_num > 40) {
+        ap_num = 40;
+    }
+
+    wifi_ap_record_t *records = calloc(ap_num, sizeof(wifi_ap_record_t));
+    wifi_scan_ap_t *list = calloc(ap_num, sizeof(wifi_scan_ap_t));
+    if (!records || !list) {
+        free(records);
+        free(list);
+        return ESP_ERR_NO_MEM;
+    }
+
+    uint16_t count = ap_num;
+    err = esp_wifi_scan_get_ap_records(&count, records);
+    if (err != ESP_OK) {
+        free(records);
+        free(list);
+        return err;
+    }
+
+    for (uint16_t i = 0; i < count; i++) {
+        strncpy(list[i].ssid, (char *)records[i].ssid, sizeof(list[i].ssid) - 1);
+        list[i].rssi = records[i].rssi;
+        list[i].authmode = records[i].authmode;
+    }
+    free(records);
+    *out_list = list;
+    *out_count = count;
+    return ESP_OK;
 }

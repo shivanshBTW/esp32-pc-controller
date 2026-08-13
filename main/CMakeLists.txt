@@ -6,7 +6,12 @@ idf_component_register(
         "pc_state.c"
         "hid_controller.c"
         "network.c"
+        "captive_dns.c"
+        "nvs_prefs.c"
+        "mdns_service.c"
         "local_api.c"
+        "web_ui.c"
+        "ota_http.c"
         "matter_controller.c"
         "diagnostics.c"
     INCLUDE_DIRS
@@ -18,6 +23,10 @@ idf_component_register(
         esp_event
         esp_http_server
         esp_timer
+        esp_system
+        app_update
         driver
         json
+        mdns
+        lwip
 )

@@ -1,23 +1,4 @@
-menu "ESP32 PC Controller"
-
-    config PC_WIFI_SSID
-        string "Wi-Fi SSID"
-        default ""
-        help
-            Home Wi-Fi network name. Leave empty to skip Wi-Fi until configured.
-
-    config PC_WIFI_PASSWORD
-        string "Wi-Fi password"
-        default ""
-        help
-            Home Wi-Fi password. Do not commit real credentials to a public repo.
-
-    config PC_API_TOKEN
-        string "Local API bearer token"
-        default "CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
-        help
-            Shared secret for authenticated LAN API requests.
-            Generate a long random string before deploying.
+menu "WakeType"
 
     config PC_POWER_RELAY_GPIO
         int "POWER relay GPIO"
@@ -41,12 +22,12 @@ menu "ESP32 PC Controller"
             Most optocoupler relay boards: GPIO LOW = ON, GPIO HIGH = OFF.
 
     config PC_POWER_PRESS_MS
-        int "Normal power press duration (ms)"
+        int "Default power press duration (ms)"
         default 500
         range 50 2000
 
     config PC_RESET_PRESS_MS
-        int "Reset press duration (ms)"
+        int "Default reset press duration (ms)"
         default 500
         range 50 2000
 

@@ -1,97 +1,103 @@
-# ESP32-S3 Remote PC Controller
+# WakeType
 
-Firmware for an ESP32-S3 that sits inside a desktop PC and provides:
+ESP32-S3 appliance firmware for remote PC power, reset, and USB HID keyboard control.
 
-- Safe remote power / long-hold / reset (relay pulses with hard timeouts)
-- PC on/off sensing (PC817)
-- Authenticated local HTTP API
-- USB HID keyboard (stub → real TinyUSB next)
-- Matter / Google Home short power pulse (stub → Espressif Matter next)
+WakeType is **not** an operating system and is **not** LumosOS. It lives inside a desktop PC and safely pulses motherboard POWER/RESET switch headers, reports power state, and (later) types via native USB.
 
-**You do not need to design the firmware.** Tell me the features you want; I handle pins, safety, and code.
+## Hardware
 
-## Board locked in
+- ESP32-S3-WROOM-1-N16R8 (dual USB-C DevKit)
+- 2-channel 5V optocoupler relay module (POWER + RESET, COM/NO in parallel with case buttons)
+- PC817 optocoupler for POWER LED sense
+- Always-powered PC USB port for the ESP32
 
-- Module: **ESP32-S3-WROOM-1-N16R8** (16MB flash, 8MB PSRAM)
-- Dual USB-C DevKit (Serial/JTAG + native USB)
+Provisional GPIOs (change in `idf.py menuconfig` → WakeType):
 
-Provisional wiring (changeable later without rewriting logic):
+| Function | GPIO |
+|----------|------|
+| POWER relay | 4 |
+| RESET relay | 5 |
+| PC state (PC817) | 6 |
 
-| Function         | GPIO |
-| ---------------- | ---- |
-| POWER relay      | 4    |
-| RESET relay      | 5    |
-| PC state (PC817) | 6    |
+Relays default to **active-low**.
 
-Relays assumed **active-low** (HIGH = off).
+## Safety
 
-## Safety rules already in the code
+- Relays forced OFF at boot (before Wi‑Fi/HTTP)
+- No permanent relay-on API
+- Firmware owns pulse timing (max 8 s) + watchdog
+- POWER/RESET mutual exclusion
+- Emergency `POST /api/v1/pc/release`
+- OTA forces relays OFF before flashing
+- Local lock can block Matter/API remote commands; physical case buttons still work
 
-- Relays forced OFF at boot
-- No permanent “relay on” API
-- ESP32 owns pulse timing (max **8 seconds**)
-- Independent relay watchdog
-- POWER and RESET cannot run at the same time
-- Emergency `POST /api/pc/release`
-- Matter path (when enabled) may only call short `powerPress()`
+## First boot (Wi‑Fi)
 
-## What you need to do (simple)
+1. Flash firmware over USB (Serial/JTAG port).
+2. Phone/laptop joins Wi‑Fi hotspot **`WakeType-Setup`**.
+3. Open `http://192.168.4.1/` (captive portal may open automatically).
+4. Scan → pick home Wi‑Fi → Save & connect.
+5. Copy the API token from the status JSON into the token box (saved in the browser).
+6. After join: open `http://waketype.local/` on your LAN.
 
-1. Keep the board nearby with a USB-C cable.
-2. Tell me your **Wi-Fi name** when you’re ready for network tests (I’ll configure it securely; it won’t go into a public git commit).
-3. When we wire hardware: I’ll give you **step-by-step “plug wire A into pin B”** instructions — no electronics theory required.
-4. Never connect relays to the motherboard until I’ve said the firmware passed dry tests.
+If STA Wi‑Fi fails repeatedly, SoftAP opens again for recovery (important once the board is sealed in a PC).
 
-## Developer machine setup (I can do this for you)
-
-Requires Espressif ESP-IDF for ESP32-S3. After IDF is installed and `export.sh` is sourced:
+## Build / flash
 
 ```bash
-cd /Users/shivanshtyagi/Codebase/esp32-pc-controller
+. $HOME/esp/esp-idf/export.sh
+cd /path/to/esp32-pc-controller
 idf.py set-target esp32s3
 idf.py build
 idf.py -p /dev/cu.usbmodem* flash monitor
 ```
 
-Configure Wi-Fi / API token (optional until network stage):
+## Local API (`/api/v1`)
 
-```bash
-idf.py menuconfig
-# → ESP32 PC Controller
-```
-
-## Local API (after Wi-Fi works)
-
-All routes require header:
+Header (after setup):
 
 ```http
-Authorization: Bearer <your-token>
+Authorization: Bearer <token>
 ```
 
-| Method | Path                 | Action                             |
-| ------ | -------------------- | ---------------------------------- |
-| GET    | `/api/status`        | Status JSON                        |
-| POST   | `/api/pc/power`      | 500 ms power press                 |
-| POST   | `/api/pc/power/hold` | Long hold (`{"duration_ms":5000}`) |
-| POST   | `/api/pc/reset`      | 500 ms reset                       |
-| POST   | `/api/pc/release`    | Emergency release                  |
-| POST   | `/api/hid/key`       | `{"key":"enter"}` etc.             |
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/v1/status` | Health, Wi‑Fi, PC state, relays, heap |
+| GET | `/api/v1/wifi/scan` | Nearby SSIDs (setup UI) |
+| POST | `/api/v1/wifi/connect` | `{"ssid","password"}` |
+| GET/POST | `/api/v1/settings` | Hostname, static IP, timings, local lock |
+| GET/POST | `/api/v1/config` | JSON backup/restore (secrets optional; clears static IP on import by default) |
+| POST | `/api/v1/pc/power` | Short power press |
+| POST | `/api/v1/pc/power/hold` | `{"duration_ms":5000}` |
+| POST | `/api/v1/pc/reset` | Reset pulse |
+| POST | `/api/v1/pc/release` | Emergency release |
+| POST | `/api/v1/hid/key` | `{"key":"enter"}` (HID stub until TinyUSB) |
+| POST | `/api/v1/ota` | Raw `.bin` upload (auth required) |
 
-## Build status
+Web UI pages: `/` (status + controls + Wi‑Fi), `/settings`, `/ota`.
 
-Scaffolded for bring-up. Next: install ESP-IDF on this Mac, flash a blink/safe-boot build, then dry-test relays before any motherboard connection.
+mDNS: `waketype.local`, service `_waketype._tcp`.
+
+## Dry-test relays (before motherboard wiring)
+
+With the board powered over USB only (relays **not** wired to the PC yet):
+
+1. Join `WakeType-Setup` or LAN `waketype.local`.
+2. Paste API token → **Refresh** — confirm `power_relay_active` / `reset_relay_active` are false.
+3. Tap **Power** — relay module LED/click for ~500 ms, then off.
+4. Tap **Long hold** — ~5 s then off (never leave ON).
+5. Tap **Reset** — short pulse on channel 2.
+6. Tap **Release** anytime — both off.
+7. Confirm `pc_state` moves only when PC817 is wired; ignore it until then.
+
+Do **not** connect COM/NO to motherboard headers until hundreds of dry cycles look correct.
+
+## Deferred
+
+- Neighbor browse / WebSocket status push
+- Real Matter (Google Home) and real USB HID
+- Custom phone/server apps (use the API)
 
 ## License
 
-ESP32-PC-controller — including **all past and present commits** in this repository — is
-licensed under the [GNU General Public License v3.0](LICENSE), with
-[Additional Terms](NOTICE) under GPL §7.
-
-In short:
-
-- Derivative works and redistributed copies must remain open source under GPL-3.0.
-- Products built with LumosOS must give clear front-page credit that LumosOS was used to build them (see `NOTICE`).
-
-```
-Copyright (C) 2026 Shivansh Tyagi
-```
+GPL-3.0 with additional terms — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
