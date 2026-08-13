@@ -303,6 +303,23 @@ static esp_err_t handle_settings_post(httpd_req_t *req)
     if (cJSON_IsBool(b)) {
         s->wifi_use_static = cJSON_IsTrue(b);
     }
+
+    if (s->wifi_use_static) {
+        const char *mask = s->wifi_netmask[0] ? s->wifi_netmask : "255.255.255.0";
+        if (!network_ipv4_ok(s->wifi_ip) || !network_ipv4_ok(s->wifi_gateway) ||
+            !network_ipv4_ok(mask) ||
+            (s->wifi_dns1[0] && !network_ipv4_ok(s->wifi_dns1)) ||
+            (s->wifi_dns2[0] && !network_ipv4_ok(s->wifi_dns2))) {
+            cJSON_Delete(json);
+            httpd_resp_set_status(req, "400 Bad Request");
+            return httpd_resp_sendstr(req,
+                "{\"error\":\"invalid_static_ip\","
+                "\"hint\":\"Use full IPv4 like 192.168.1.50, gateway 192.168.1.1, netmask 255.255.255.0\"}");
+        }
+        if (s->wifi_netmask[0] == '\0') {
+            strncpy(s->wifi_netmask, "255.255.255.0", sizeof(s->wifi_netmask) - 1);
+        }
+    }
     b = cJSON_GetObjectItem(json, "local_lock");
     if (cJSON_IsBool(b)) {
         s->local_lock = cJSON_IsTrue(b);

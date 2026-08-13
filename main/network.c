@@ -43,6 +43,39 @@ static void apply_hostname(void)
     ESP_LOGI(TAG, "DHCP hostname: %s", host);
 }
 
+static bool parse_ipv4(const char *text, esp_ip4_addr_t *out)
+{
+    if (!text || text[0] == '\0' || !out) {
+        return false;
+    }
+    /* Reject common UI mistakes: spaces, CIDR suffixes, incomplete values */
+    for (const char *p = text; *p; p++) {
+        if (*p == ' ' || *p == '/') {
+            return false;
+        }
+    }
+    return esp_netif_str_to_ip4(text, out) == ESP_OK;
+}
+
+static esp_err_t start_dhcp_client(void)
+{
+    esp_err_t err = esp_netif_dhcpc_start(s_sta_netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
+        return err;
+    }
+    ESP_LOGI(TAG, "STA IP mode: DHCP");
+    return ESP_OK;
+}
+
+static void disable_broken_static_config(const char *reason)
+{
+    waketype_settings_t *s = nvs_prefs_mutable();
+    ESP_LOGE(TAG, "Static IP invalid (%s) ip='%s' gw='%s' mask='%s' — falling back to DHCP",
+             reason, s->wifi_ip, s->wifi_gateway, s->wifi_netmask);
+    s->wifi_use_static = false;
+    nvs_prefs_save();
+}
+
 static esp_err_t apply_static_or_dhcp(void)
 {
     if (!s_sta_netif) {
@@ -50,42 +83,40 @@ static esp_err_t apply_static_or_dhcp(void)
     }
     const waketype_settings_t *s = nvs_prefs_get();
     if (!s->wifi_use_static) {
-        esp_err_t err = esp_netif_dhcpc_start(s_sta_netif);
-        if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-            return err;
-        }
-        ESP_LOGI(TAG, "STA IP mode: DHCP");
-        return ESP_OK;
-    }
-    if (s->wifi_ip[0] == '\0' || s->wifi_gateway[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
+        return start_dhcp_client();
     }
 
-    esp_netif_dhcpc_stop(s_sta_netif);
     esp_netif_ip_info_t ip_info = {0};
     const char *mask = s->wifi_netmask[0] ? s->wifi_netmask : "255.255.255.0";
-    if (esp_netif_str_to_ip4(s->wifi_ip, &ip_info.ip) != ESP_OK ||
-        esp_netif_str_to_ip4(s->wifi_gateway, &ip_info.gw) != ESP_OK ||
-        esp_netif_str_to_ip4(mask, &ip_info.netmask) != ESP_OK) {
-        return ESP_ERR_INVALID_ARG;
+    if (!parse_ipv4(s->wifi_ip, &ip_info.ip) ||
+        !parse_ipv4(s->wifi_gateway, &ip_info.gw) ||
+        !parse_ipv4(mask, &ip_info.netmask)) {
+        disable_broken_static_config("bad address format");
+        return start_dhcp_client();
     }
+
+    esp_err_t stop = esp_netif_dhcpc_stop(s_sta_netif);
+    if (stop != ESP_OK && stop != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        ESP_LOGW(TAG, "dhcpc_stop: %s (continuing)", esp_err_to_name(stop));
+    }
+
     esp_err_t err = esp_netif_set_ip_info(s_sta_netif, &ip_info);
     if (err != ESP_OK) {
-        return err;
+        disable_broken_static_config(esp_err_to_name(err));
+        return start_dhcp_client();
     }
 
     const char *dns1 = s->wifi_dns1[0] ? s->wifi_dns1 : s->wifi_gateway;
     esp_netif_dns_info_t dns = {0};
     dns.ip.type = ESP_IPADDR_TYPE_V4;
-    if (esp_netif_str_to_ip4(dns1, &dns.ip.u_addr.ip4) == ESP_OK) {
+    if (parse_ipv4(dns1, &dns.ip.u_addr.ip4)) {
         esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns);
     }
-    if (s->wifi_dns2[0]) {
-        if (esp_netif_str_to_ip4(s->wifi_dns2, &dns.ip.u_addr.ip4) == ESP_OK) {
-            esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_BACKUP, &dns);
-        }
+    if (s->wifi_dns2[0] && parse_ipv4(s->wifi_dns2, &dns.ip.u_addr.ip4)) {
+        esp_netif_set_dns_info(s_sta_netif, ESP_NETIF_DNS_BACKUP, &dns);
     }
-    ESP_LOGI(TAG, "STA IP mode: static %s", s->wifi_ip);
+
+    ESP_LOGI(TAG, "STA IP mode: static %s gw %s", s->wifi_ip, s->wifi_gateway);
     return ESP_OK;
 }
 
@@ -136,11 +167,14 @@ static esp_err_t start_sta(const char *ssid, const char *password)
     sta.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     apply_hostname();
-    ESP_ERROR_CHECK(apply_static_or_dhcp());
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    /* Never abort boot on bad static IP — fall back to DHCP inside helper. */
+    if (apply_static_or_dhcp() != ESP_OK) {
+        ESP_LOGW(TAG, "IP config failed; continuing with driver defaults");
+    }
     ESP_LOGI(TAG, "Connecting STA to '%s'...", ssid);
     return ESP_OK;
 }
@@ -321,6 +355,12 @@ int network_rssi(void)
     return s_rssi;
 }
 
+bool network_ipv4_ok(const char *text)
+{
+    esp_ip4_addr_t tmp;
+    return parse_ipv4(text, &tmp);
+}
+
 esp_err_t network_apply_ip_settings(void)
 {
     apply_hostname();
@@ -356,10 +396,10 @@ esp_err_t network_save_and_connect(const char *ssid, const char *password)
     sta.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     apply_hostname();
-    apply_static_or_dhcp();
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    apply_static_or_dhcp();
     s_ap_active = false;
     esp_wifi_connect();
     ESP_LOGI(TAG, "Saved Wi‑Fi '%s' — connecting", ssid);

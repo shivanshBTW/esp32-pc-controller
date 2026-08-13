@@ -43,6 +43,9 @@ void network_get_ip_info(network_ip_info_t *out);
 esp_err_t network_save_and_connect(const char *ssid, const char *password);
 esp_err_t network_apply_ip_settings(void);
 
+/** Validate dotted-quad IPv4 (no spaces/CIDR). */
+bool network_ipv4_ok(const char *text);
+
 /** Caller frees with free(). */
 esp_err_t network_scan(wifi_scan_ap_t **out_list, size_t *out_count);
 
