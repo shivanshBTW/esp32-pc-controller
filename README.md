@@ -31,14 +31,31 @@ Relays default to **active-low**.
 - OTA forces relays OFF before flashing
 - Local lock can block Matter/API remote commands; physical case buttons still work
 
+## Device key (`secrets.env`)
+
+Like a JS `.env`: a local file you edit, **not committed**.
+
+```bash
+cp secrets.env.example secrets.env
+# edit WAKETYPE_DEVICE_KEY=your-password
+```
+
+Then rebuild/flash. That password is the WakeType web/API **device key**.
+
+| Variable | Meaning |
+|----------|---------|
+| `WAKETYPE_DEVICE_KEY` | Password you choose |
+| `WAKETYPE_FORCE_DEVICE_KEY=1` | Overwrite key already stored on the board (use once after changing password) |
+
+On `http://waketype.local/settings`, paste the **same** password under Device key → Save.
+
 ## First boot (Wi‑Fi)
 
-1. Flash firmware over USB (Serial/JTAG port).
+1. Put your password in `secrets.env`, then flash.
 2. Phone/laptop joins Wi‑Fi hotspot **`WakeType-Setup`**.
-3. Open `http://192.168.4.1/` (captive portal may open automatically).
-4. Scan → pick home Wi‑Fi → Save & connect.
-5. Copy the API token from the status JSON into the token box (saved in the browser).
-6. After join: open `http://waketype.local/` on your LAN.
+3. Open `http://192.168.4.1/settings`.
+4. Scan → pick home Wi‑Fi → Connect.
+5. On LAN open `http://waketype.local/settings`, paste the same device key, Save.
 
 If STA Wi‑Fi fails repeatedly, SoftAP opens again for recovery (important once the board is sealed in a PC).
 

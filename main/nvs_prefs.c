@@ -135,16 +135,42 @@ esp_err_t nvs_prefs_save(void)
 
 esp_err_t nvs_prefs_ensure_api_token(void)
 {
+#ifdef WAKETYPE_DEVICE_KEY
+    const char *from_secrets = WAKETYPE_DEVICE_KEY;
+    const bool have_secrets = from_secrets[0] != '\0';
+#else
+    const char *from_secrets = "";
+    const bool have_secrets = false;
+#endif
+
+#if defined(WAKETYPE_FORCE_DEVICE_KEY) && (WAKETYPE_FORCE_DEVICE_KEY)
+    const bool force = true;
+#else
+    const bool force = false;
+#endif
+
+    if (have_secrets) {
+        if (force || s_settings.api_token[0] == '\0' ||
+            strcmp(s_settings.api_token, from_secrets) != 0) {
+            memset(s_settings.api_token, 0, sizeof(s_settings.api_token));
+            strncpy(s_settings.api_token, from_secrets, sizeof(s_settings.api_token) - 1);
+            ESP_LOGW(TAG, "Device key set from secrets.env%s", force ? " (forced)" : "");
+            return nvs_prefs_save();
+        }
+        return ESP_OK;
+    }
+
     if (s_settings.api_token[0] != '\0') {
         return ESP_OK;
     }
-    /* 32 hex chars from 16 random bytes */
+
+    /* No secrets.env key — generate random once */
     uint8_t raw[16];
     esp_fill_random(raw, sizeof(raw));
     for (int i = 0; i < 16; i++) {
         sprintf(&s_settings.api_token[i * 2], "%02x", raw[i]);
     }
     s_settings.api_token[32] = '\0';
-    ESP_LOGW(TAG, "Generated API token (save to persist)");
+    ESP_LOGW(TAG, "Generated random device key (add secrets.env to choose your own)");
     return nvs_prefs_save();
 }
