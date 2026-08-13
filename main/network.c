@@ -10,6 +10,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/task.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -261,6 +262,53 @@ const char *network_mode_string(void)
     return "down";
 }
 
+const char *network_sta_ssid(void)
+{
+    /* Prefer live association; fall back to saved prefs. */
+    if (s_sta_connected) {
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK && ap.ssid[0] != '\0') {
+            static char live[33];
+            strncpy(live, (char *)ap.ssid, sizeof(live) - 1);
+            live[sizeof(live) - 1] = '\0';
+            return live;
+        }
+    }
+    return nvs_prefs_get()->wifi_ssid;
+}
+
+void network_get_ip_info(network_ip_info_t *out)
+{
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->use_static = nvs_prefs_get()->wifi_use_static;
+    strncpy(out->ip, s_ip, sizeof(out->ip) - 1);
+
+    esp_netif_t *netif = s_sta_connected ? s_sta_netif : (s_ap_active ? s_ap_netif : NULL);
+    if (!netif) {
+        return;
+    }
+
+    esp_netif_ip_info_t info;
+    if (esp_netif_get_ip_info(netif, &info) == ESP_OK) {
+        snprintf(out->ip, sizeof(out->ip), IPSTR, IP2STR(&info.ip));
+        snprintf(out->gateway, sizeof(out->gateway), IPSTR, IP2STR(&info.gw));
+        snprintf(out->netmask, sizeof(out->netmask), IPSTR, IP2STR(&info.netmask));
+    }
+
+    esp_netif_dns_info_t dns;
+    if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK &&
+        dns.ip.type == ESP_IPADDR_TYPE_V4) {
+        snprintf(out->dns1, sizeof(out->dns1), IPSTR, IP2STR(&dns.ip.u_addr.ip4));
+    }
+    if (esp_netif_get_dns_info(netif, ESP_NETIF_DNS_BACKUP, &dns) == ESP_OK &&
+        dns.ip.type == ESP_IPADDR_TYPE_V4 && dns.ip.u_addr.ip4.addr != 0) {
+        snprintf(out->dns2, sizeof(out->dns2), IPSTR, IP2STR(&dns.ip.u_addr.ip4));
+    }
+}
+
 int network_rssi(void)
 {
     if (!s_sta_connected) {
@@ -332,12 +380,24 @@ esp_err_t network_scan(wifi_scan_ap_t **out_list, size_t *out_count)
         esp_wifi_set_mode(WIFI_MODE_APSTA);
     }
 
+    /* Drop any previous scan results; allow scan while STA is associated. */
+    esp_wifi_scan_stop();
     wifi_scan_config_t scan = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
         .show_hidden = false,
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active.min = 100,
+        .scan_time.active.max = 300,
     };
     esp_err_t err = esp_wifi_scan_start(&scan, true);
+    if (err == ESP_ERR_WIFI_STATE) {
+        vTaskDelay(pdMS_TO_TICKS(200));
+        err = esp_wifi_scan_start(&scan, true);
+    }
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Wi‑Fi scan failed: %s", esp_err_to_name(err));
         return err;
     }
 

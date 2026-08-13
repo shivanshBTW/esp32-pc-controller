@@ -24,7 +24,21 @@ bool network_is_setup_mode(void);
 
 const char *network_ip_string(void);
 const char *network_mode_string(void);
+/** Configured / currently associated STA SSID (empty if none). */
+const char *network_sta_ssid(void);
 int network_rssi(void);
+
+typedef struct {
+    char ip[16];
+    char gateway[16];
+    char netmask[16];
+    char dns1[16];
+    char dns2[16];
+    bool use_static;
+} network_ip_info_t;
+
+/** Live STA/AP interface addresses (DHCP lease or static). */
+void network_get_ip_info(network_ip_info_t *out);
 
 esp_err_t network_save_and_connect(const char *ssid, const char *password);
 esp_err_t network_apply_ip_settings(void);

@@ -63,7 +63,10 @@ static esp_err_t reject_unauthorized(httpd_req_t *req)
 {
     httpd_resp_set_status(req, "401 Unauthorized");
     httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"error\":\"unauthorized\"}");
+    return httpd_resp_sendstr(req,
+        "{\"error\":\"unauthorized\","
+        "\"hint\":\"This browser is missing the device key. Open Settings and paste it, "
+        "or join Wi-Fi WakeType-Setup and open http://192.168.4.1 to recover it.\"}");
 }
 
 static esp_err_t send_json(httpd_req_t *req, cJSON *root)
@@ -124,10 +127,20 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddStringToObject(root, "last_command", diagnostics_last_command());
     cJSON_AddStringToObject(root, "pc_state",
                             pc_state_to_string(pc_controller_get_pc_state()));
+    network_ip_info_t ipinfo;
+    network_get_ip_info(&ipinfo);
+
     cJSON_AddStringToObject(root, "wifi_mode", network_mode_string());
     cJSON_AddBoolToObject(root, "wifi_connected", network_is_sta_connected());
     cJSON_AddBoolToObject(root, "setup_mode", setup);
-    cJSON_AddStringToObject(root, "ip", network_ip_string());
+    cJSON_AddStringToObject(root, "wifi_ssid", network_sta_ssid());
+    cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
+    cJSON_AddStringToObject(root, "ip", ipinfo.ip[0] ? ipinfo.ip : network_ip_string());
+    cJSON_AddStringToObject(root, "gateway", ipinfo.gateway);
+    cJSON_AddStringToObject(root, "netmask", ipinfo.netmask);
+    cJSON_AddStringToObject(root, "dns1", ipinfo.dns1);
+    cJSON_AddStringToObject(root, "dns2", ipinfo.dns2);
+    cJSON_AddBoolToObject(root, "wifi_use_static", ipinfo.use_static);
     cJSON_AddStringToObject(root, "hostname", s->hostname);
     cJSON_AddNumberToObject(root, "rssi", network_rssi());
     cJSON_AddBoolToObject(root, "relay_busy", relay_controller_is_busy());
@@ -138,8 +151,11 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddStringToObject(root, "matter", "stub");
     cJSON_AddNumberToObject(root, "heap_free", (double)esp_get_free_heap_size());
     cJSON_AddNumberToObject(root, "heap_min", (double)esp_get_minimum_free_heap_size());
-    if (setup) {
-        cJSON_AddStringToObject(root, "api_token", s->api_token);
+    /* Setup hotspot: always include key so the browser can remember it.
+     * When already authorized: include it so Settings can show/copy it. */
+    if (setup || authorize(req)) {
+        cJSON_AddStringToObject(root, "device_key", s->api_token);
+        cJSON_AddStringToObject(root, "api_token", s->api_token); /* alias */
     }
     mdns_service_update_txt();
     return send_json(req, root);
@@ -195,7 +211,10 @@ static esp_err_t handle_wifi_connect(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "ok", err == ESP_OK);
     cJSON_AddStringToObject(root, "error", esp_err_to_name(err));
     if (err == ESP_OK) {
+        cJSON_AddStringToObject(root, "device_key", nvs_prefs_get()->api_token);
         cJSON_AddStringToObject(root, "api_token", nvs_prefs_get()->api_token);
+        cJSON_AddStringToObject(root, "next_url_hint",
+                                "After the board joins Wi-Fi, open http://waketype.local/settings?key=YOUR_DEVICE_KEY");
     } else {
         httpd_resp_set_status(req, "409 Conflict");
     }
@@ -210,21 +229,38 @@ static esp_err_t handle_settings_get(httpd_req_t *req)
     }
 
     const waketype_settings_t *s = nvs_prefs_get();
+    network_ip_info_t live;
+    network_get_ip_info(&live);
+
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "hostname", s->hostname);
+    cJSON_AddStringToObject(root, "wifi_ssid", network_sta_ssid());
+    cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
+    cJSON_AddBoolToObject(root, "wifi_connected", network_is_sta_connected());
+    cJSON_AddStringToObject(root, "wifi_mode", network_mode_string());
+    /* Live lease / interface addresses (what the device is using now) */
+    cJSON_AddStringToObject(root, "current_ip", live.ip);
+    cJSON_AddStringToObject(root, "current_gateway", live.gateway);
+    cJSON_AddStringToObject(root, "current_netmask", live.netmask);
+    cJSON_AddStringToObject(root, "current_dns1", live.dns1);
+    cJSON_AddStringToObject(root, "current_dns2", live.dns2);
+    /* Saved static-IP config (may be empty when using DHCP) */
     cJSON_AddBoolToObject(root, "wifi_use_static", s->wifi_use_static);
     cJSON_AddStringToObject(root, "wifi_ip", s->wifi_ip);
     cJSON_AddStringToObject(root, "wifi_gateway", s->wifi_gateway);
     cJSON_AddStringToObject(root, "wifi_netmask", s->wifi_netmask);
     cJSON_AddStringToObject(root, "wifi_dns1", s->wifi_dns1);
     cJSON_AddStringToObject(root, "wifi_dns2", s->wifi_dns2);
-    cJSON_AddStringToObject(root, "wifi_ssid", s->wifi_ssid);
     cJSON_AddBoolToObject(root, "local_lock", s->local_lock);
     cJSON_AddBoolToObject(root, "local_lock_blocks_api", s->local_lock_blocks_api);
     cJSON_AddNumberToObject(root, "power_press_ms", s->power_press_ms);
     cJSON_AddNumberToObject(root, "reset_press_ms", s->reset_press_ms);
     cJSON_AddNumberToObject(root, "default_long_press_ms", s->default_long_press_ms);
     cJSON_AddNumberToObject(root, "max_relay_hold_ms", MAX_RELAY_HOLD_MS);
+    if (network_is_setup_mode() || authorize(req)) {
+        cJSON_AddStringToObject(root, "device_key", s->api_token);
+        cJSON_AddStringToObject(root, "api_token", s->api_token);
+    }
     return send_json(req, root);
 }
 
