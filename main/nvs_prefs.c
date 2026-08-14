@@ -24,6 +24,9 @@ static void set_defaults(void)
     s_settings.default_long_press_ms = DEFAULT_LONG_PRESS_MS_DEFAULT;
     s_settings.local_lock = false;
     s_settings.local_lock_blocks_api = true;
+    s_settings.power_relay_gpio = (uint8_t)POWER_RELAY_GPIO;
+    s_settings.reset_relay_gpio = (uint8_t)RESET_RELAY_GPIO;
+    s_settings.pc_state_gpio = (uint8_t)PC_STATE_GPIO;
 }
 
 static void get_str(nvs_handle_t h, const char *key, char *out, size_t out_len)
@@ -80,13 +83,38 @@ esp_err_t nvs_prefs_init(void)
         s_settings.default_long_press_ms = u32;
     }
 
+    uint8_t g = 0;
+    uint8_t pwr = s_settings.power_relay_gpio;
+    uint8_t rst = s_settings.reset_relay_gpio;
+    uint8_t st = s_settings.pc_state_gpio;
+    if (nvs_get_u8(h, "gpio_pwr", &g) == ESP_OK) {
+        pwr = g;
+    }
+    if (nvs_get_u8(h, "gpio_rst", &g) == ESP_OK) {
+        rst = g;
+    }
+    if (nvs_get_u8(h, "gpio_st", &g) == ESP_OK) {
+        st = g;
+    }
+    if (waketype_gpio_trio_ok(pwr, rst, st)) {
+        s_settings.power_relay_gpio = pwr;
+        s_settings.reset_relay_gpio = rst;
+        s_settings.pc_state_gpio = st;
+    } else {
+        ESP_LOGW(TAG, "Ignoring invalid saved GPIOs %u/%u/%u — using defaults",
+                 (unsigned)pwr, (unsigned)rst, (unsigned)st);
+    }
+
     nvs_close(h);
     if (s_settings.hostname[0] == '\0') {
         strncpy(s_settings.hostname, HOSTNAME_DEFAULT, sizeof(s_settings.hostname) - 1);
     }
     s_ready = true;
-    ESP_LOGI(TAG, "Prefs loaded (ssid='%s' hostname='%s')",
-             s_settings.wifi_ssid, s_settings.hostname);
+    ESP_LOGI(TAG, "Prefs loaded (ssid='%s' hostname='%s' gpio pwr=%u rst=%u state=%u)",
+             s_settings.wifi_ssid, s_settings.hostname,
+             (unsigned)s_settings.power_relay_gpio,
+             (unsigned)s_settings.reset_relay_gpio,
+             (unsigned)s_settings.pc_state_gpio);
     return ESP_OK;
 }
 
@@ -126,6 +154,9 @@ esp_err_t nvs_prefs_save(void)
     nvs_set_u32(h, "pwr_ms", s_settings.power_press_ms);
     nvs_set_u32(h, "rst_ms", s_settings.reset_press_ms);
     nvs_set_u32(h, "long_ms", s_settings.default_long_press_ms);
+    nvs_set_u8(h, "gpio_pwr", s_settings.power_relay_gpio);
+    nvs_set_u8(h, "gpio_rst", s_settings.reset_relay_gpio);
+    nvs_set_u8(h, "gpio_st", s_settings.pc_state_gpio);
 
     err = nvs_commit(h);
     nvs_close(h);

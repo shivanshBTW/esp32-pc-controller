@@ -7,6 +7,7 @@
 #include "nvs_prefs.h"
 #include "ota_http.h"
 #include "pc_controller.h"
+#include "pc_state.h"
 #include "relay_controller.h"
 #include "web_ui.h"
 
@@ -146,6 +147,9 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "relay_busy", relay_controller_is_busy());
     cJSON_AddBoolToObject(root, "power_relay_active", relay_controller_power_active());
     cJSON_AddBoolToObject(root, "reset_relay_active", relay_controller_reset_active());
+    cJSON_AddNumberToObject(root, "power_relay_gpio", relay_controller_power_gpio());
+    cJSON_AddNumberToObject(root, "reset_relay_gpio", relay_controller_reset_gpio());
+    cJSON_AddNumberToObject(root, "pc_state_gpio", pc_state_gpio());
     cJSON_AddBoolToObject(root, "local_lock", pc_controller_is_local_lock());
     cJSON_AddBoolToObject(root, "hid_ready", hid_controller_is_ready());
     cJSON_AddStringToObject(root, "matter", "stub");
@@ -257,6 +261,9 @@ static esp_err_t handle_settings_get(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "reset_press_ms", s->reset_press_ms);
     cJSON_AddNumberToObject(root, "default_long_press_ms", s->default_long_press_ms);
     cJSON_AddNumberToObject(root, "max_relay_hold_ms", MAX_RELAY_HOLD_MS);
+    cJSON_AddNumberToObject(root, "power_relay_gpio", s->power_relay_gpio);
+    cJSON_AddNumberToObject(root, "reset_relay_gpio", s->reset_relay_gpio);
+    cJSON_AddNumberToObject(root, "pc_state_gpio", s->pc_state_gpio);
     if (network_is_setup_mode() || authorize(req)) {
         cJSON_AddStringToObject(root, "device_key", s->api_token);
         cJSON_AddStringToObject(root, "api_token", s->api_token);
@@ -346,12 +353,51 @@ static esp_err_t handle_settings_post(httpd_req_t *req)
         }
         s->default_long_press_ms = v;
     }
+
+    uint8_t pwr_g = s->power_relay_gpio;
+    uint8_t rst_g = s->reset_relay_gpio;
+    uint8_t st_g = s->pc_state_gpio;
+    bool gpio_touch = false;
+    n = cJSON_GetObjectItem(json, "power_relay_gpio");
+    if (cJSON_IsNumber(n)) {
+        pwr_g = (uint8_t)n->valuedouble;
+        gpio_touch = true;
+    }
+    n = cJSON_GetObjectItem(json, "reset_relay_gpio");
+    if (cJSON_IsNumber(n)) {
+        rst_g = (uint8_t)n->valuedouble;
+        gpio_touch = true;
+    }
+    n = cJSON_GetObjectItem(json, "pc_state_gpio");
+    if (cJSON_IsNumber(n)) {
+        st_g = (uint8_t)n->valuedouble;
+        gpio_touch = true;
+    }
+    if (gpio_touch) {
+        if (!waketype_gpio_trio_ok(pwr_g, rst_g, st_g)) {
+            cJSON_Delete(json);
+            httpd_resp_set_status(req, "400 Bad Request");
+            return httpd_resp_sendstr(req,
+                "{\"error\":\"invalid_gpio\","
+                "\"hint\":\"Use three different safe GPIOs (e.g. 4/5/6 or 13/14/6). "
+                "Avoid USB 19/20, flash 33-37, and strapping pins.\"}");
+        }
+        s->power_relay_gpio = pwr_g;
+        s->reset_relay_gpio = rst_g;
+        s->pc_state_gpio = st_g;
+    }
     cJSON_Delete(json);
 
     esp_err_t err = nvs_prefs_save();
     if (err == ESP_OK) {
         network_apply_ip_settings();
         mdns_service_start();
+        if (gpio_touch) {
+            err = relay_controller_set_pins(s->power_relay_gpio, s->reset_relay_gpio);
+            if (err == ESP_OK) {
+                err = pc_state_set_gpio(s->pc_state_gpio);
+            }
+        }
     }
     return send_result(req, err);
 }
@@ -378,6 +424,9 @@ static esp_err_t handle_config_get(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "power_press_ms", s->power_press_ms);
     cJSON_AddNumberToObject(root, "reset_press_ms", s->reset_press_ms);
     cJSON_AddNumberToObject(root, "default_long_press_ms", s->default_long_press_ms);
+    cJSON_AddNumberToObject(root, "power_relay_gpio", s->power_relay_gpio);
+    cJSON_AddNumberToObject(root, "reset_relay_gpio", s->reset_relay_gpio);
+    cJSON_AddNumberToObject(root, "pc_state_gpio", s->pc_state_gpio);
     /* secrets omitted by default */
     cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
     cJSON_AddBoolToObject(root, "api_token_set", s->api_token[0] != '\0');
@@ -457,11 +506,34 @@ static esp_err_t handle_config_post(httpd_req_t *req)
         }
         s->default_long_press_ms = v;
     }
+
+    uint8_t pwr_g = s->power_relay_gpio;
+    uint8_t rst_g = s->reset_relay_gpio;
+    uint8_t st_g = s->pc_state_gpio;
+    n = cJSON_GetObjectItem(json, "power_relay_gpio");
+    if (cJSON_IsNumber(n)) {
+        pwr_g = (uint8_t)n->valuedouble;
+    }
+    n = cJSON_GetObjectItem(json, "reset_relay_gpio");
+    if (cJSON_IsNumber(n)) {
+        rst_g = (uint8_t)n->valuedouble;
+    }
+    n = cJSON_GetObjectItem(json, "pc_state_gpio");
+    if (cJSON_IsNumber(n)) {
+        st_g = (uint8_t)n->valuedouble;
+    }
+    if (waketype_gpio_trio_ok(pwr_g, rst_g, st_g)) {
+        s->power_relay_gpio = pwr_g;
+        s->reset_relay_gpio = rst_g;
+        s->pc_state_gpio = st_g;
+    }
     cJSON_Delete(json);
 
     esp_err_t err = nvs_prefs_save();
     if (err == ESP_OK) {
         network_apply_ip_settings();
+        relay_controller_set_pins(s->power_relay_gpio, s->reset_relay_gpio);
+        pc_state_set_gpio(s->pc_state_gpio);
     }
     return send_result(req, err);
 }

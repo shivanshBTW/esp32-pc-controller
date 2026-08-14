@@ -10,7 +10,7 @@ extern "C" {
 
 #define PRODUCT_NAME              "WakeType"
 #define FIRMWARE_VERSION          "0.2.0-dev"
-#define CONFIG_SCHEMA_VERSION     1
+#define CONFIG_SCHEMA_VERSION     2
 
 #define AP_SSID_DEFAULT           "WakeType-Setup"
 #define HOSTNAME_DEFAULT          "waketype"
@@ -42,6 +42,40 @@ static inline int relay_active_level(void)
 static inline int relay_inactive_level(void)
 {
     return RELAY_ACTIVE_LOW ? 1 : 0;
+}
+
+/** True if GPIO is allowed for user-selectable WakeType wiring on ESP32-S3. */
+static inline bool waketype_gpio_allowed(int gpio)
+{
+    if (gpio < 1 || gpio > 48) {
+        return false;
+    }
+    /* USB Serial/JTAG */
+    if (gpio == 19 || gpio == 20) {
+        return false;
+    }
+    /* Strapping */
+    if (gpio == 0 || gpio == 3 || gpio == 45 || gpio == 46) {
+        return false;
+    }
+    /* Octal flash / PSRAM (WROOM-1-N16R8) */
+    if (gpio >= 33 && gpio <= 37) {
+        return false;
+    }
+    /* UART0 console */
+    if (gpio == 43 || gpio == 44) {
+        return false;
+    }
+    return true;
+}
+
+static inline bool waketype_gpio_trio_ok(int power_gpio, int reset_gpio, int state_gpio)
+{
+    if (!waketype_gpio_allowed(power_gpio) || !waketype_gpio_allowed(reset_gpio) ||
+        !waketype_gpio_allowed(state_gpio)) {
+        return false;
+    }
+    return power_gpio != reset_gpio && power_gpio != state_gpio && reset_gpio != state_gpio;
 }
 
 #ifdef __cplusplus

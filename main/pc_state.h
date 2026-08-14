@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,6 +15,11 @@ typedef enum {
 } pc_power_state_t;
 
 esp_err_t pc_state_init(void);
+
+/** Live-switch PC817 sense GPIO. */
+esp_err_t pc_state_set_gpio(uint8_t gpio);
+
+int pc_state_gpio(void);
 
 /** Latest interpreted state from PC817 feedback (not inferred from relay presses). */
 pc_power_state_t pc_state_get(void);

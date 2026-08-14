@@ -24,6 +24,9 @@ typedef struct {
     uint32_t power_press_ms;
     uint32_t reset_press_ms;
     uint32_t default_long_press_ms;
+    uint8_t power_relay_gpio;
+    uint8_t reset_relay_gpio;
+    uint8_t pc_state_gpio;
 } waketype_settings_t;
 
 esp_err_t nvs_prefs_init(void);

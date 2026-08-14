@@ -11,15 +11,15 @@ WakeType is **not** an operating system and is **not** LumosOS. It lives inside 
 - PC817 optocoupler for POWER LED sense
 - Always-powered PC USB port for the ESP32
 
-Provisional GPIOs (change in `idf.py menuconfig` → WakeType):
+Default GPIOs (change anytime in **Settings → GPIO pins**, or `idf.py menuconfig` → WakeType for compile-time defaults):
 
-| Function | GPIO |
-|----------|------|
+| Function | Default GPIO |
+|----------|--------------|
 | POWER relay | 4 |
 | RESET relay | 5 |
 | PC state (PC817) | 6 |
 
-Relays default to **active-low**.
+Relays default to **active-low**. Example alternate wiring: 13 / 14 / 6.
 
 ## Safety
 

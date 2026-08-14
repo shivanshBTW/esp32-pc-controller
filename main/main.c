@@ -20,17 +20,13 @@ void app_main(void)
 
     /*
      * Boot order (safety first):
-     * 1-4 relays safe/off
-     * 5 prefs / PC-state
-     * 6 USB HID
-     * 7-8 networking (STA or SoftAP)
-     * 9 local API + web UI
-     * 10 Matter stub
+     * 1 NVS prefs (needed for GPIO pin choices)
+     * 2-4 relays safe/off on those pins
+     * 5 PC-state / HID
+     * 6-7 networking (STA or SoftAP)
+     * 8 local API + web UI
+     * 9 Matter stub
      */
-
-    ESP_ERROR_CHECK(relay_controller_early_init());
-    ESP_ERROR_CHECK(relay_controller_init());
-    ESP_ERROR_CHECK(pc_controller_release_all());
 
     esp_err_t nvs = nvs_flash_init();
     if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -40,6 +36,9 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs);
 
     ESP_ERROR_CHECK(nvs_prefs_init());
+    ESP_ERROR_CHECK(relay_controller_early_init());
+    ESP_ERROR_CHECK(relay_controller_init());
+    ESP_ERROR_CHECK(pc_controller_release_all());
     ESP_ERROR_CHECK(nvs_prefs_ensure_api_token());
     ESP_ERROR_CHECK(diagnostics_init());
     ESP_ERROR_CHECK(pc_state_init());

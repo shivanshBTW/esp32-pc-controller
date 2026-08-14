@@ -1,5 +1,6 @@
 #include "relay_controller.h"
 #include "configuration.h"
+#include "nvs_prefs.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -17,10 +18,13 @@ static volatile bool s_power_active;
 static volatile bool s_reset_active;
 static volatile bool s_busy;
 
+static gpio_num_t s_power_gpio = (gpio_num_t)CONFIG_PC_POWER_RELAY_GPIO;
+static gpio_num_t s_reset_gpio = (gpio_num_t)CONFIG_PC_RESET_RELAY_GPIO;
+
 static void relay_write(relay_channel_t channel, bool active)
 {
     const gpio_num_t pin =
-        (channel == RELAY_CHANNEL_POWER) ? POWER_RELAY_GPIO : RESET_RELAY_GPIO;
+        (channel == RELAY_CHANNEL_POWER) ? s_power_gpio : s_reset_gpio;
     const int level = active ? relay_active_level() : relay_inactive_level();
     gpio_set_level(pin, level);
 
@@ -33,8 +37,8 @@ static void relay_write(relay_channel_t channel, bool active)
 
 static void relay_force_inactive_both(void)
 {
-    gpio_set_level(POWER_RELAY_GPIO, relay_inactive_level());
-    gpio_set_level(RESET_RELAY_GPIO, relay_inactive_level());
+    gpio_set_level(s_power_gpio, relay_inactive_level());
+    gpio_set_level(s_reset_gpio, relay_inactive_level());
     s_power_active = false;
     s_reset_active = false;
 }
@@ -65,16 +69,47 @@ static esp_err_t configure_relay_gpio(gpio_num_t pin)
     return gpio_set_level(pin, relay_inactive_level());
 }
 
+static void force_inactive_pin(gpio_num_t pin)
+{
+    if (!waketype_gpio_allowed((int)pin)) {
+        return;
+    }
+    configure_relay_gpio(pin);
+}
+
 esp_err_t relay_controller_early_init(void)
 {
-    ESP_LOGI(TAG, "Early safe state: POWER=GPIO%d RESET=GPIO%d active_low=%d",
-             POWER_RELAY_GPIO, RESET_RELAY_GPIO, (int)RELAY_ACTIVE_LOW);
+    const waketype_settings_t *s = nvs_prefs_get();
+    const int pwr = s ? s->power_relay_gpio : CONFIG_PC_POWER_RELAY_GPIO;
+    const int rst = s ? s->reset_relay_gpio : CONFIG_PC_RESET_RELAY_GPIO;
+    const int st = s ? s->pc_state_gpio : CONFIG_PC_STATE_GPIO;
 
-    esp_err_t err = configure_relay_gpio(POWER_RELAY_GPIO);
+    if (waketype_gpio_trio_ok(pwr, rst, st)) {
+        s_power_gpio = (gpio_num_t)pwr;
+        s_reset_gpio = (gpio_num_t)rst;
+    } else {
+        s_power_gpio = (gpio_num_t)CONFIG_PC_POWER_RELAY_GPIO;
+        s_reset_gpio = (gpio_num_t)CONFIG_PC_RESET_RELAY_GPIO;
+    }
+
+    ESP_LOGI(TAG, "Early safe state: POWER=GPIO%d RESET=GPIO%d active_low=%d",
+             (int)s_power_gpio, (int)s_reset_gpio, (int)RELAY_ACTIVE_LOW);
+
+    /* Also park compile-time defaults if the user moved away from them. */
+    if ((int)s_power_gpio != CONFIG_PC_POWER_RELAY_GPIO &&
+        (int)s_reset_gpio != CONFIG_PC_POWER_RELAY_GPIO) {
+        force_inactive_pin((gpio_num_t)CONFIG_PC_POWER_RELAY_GPIO);
+    }
+    if ((int)s_power_gpio != CONFIG_PC_RESET_RELAY_GPIO &&
+        (int)s_reset_gpio != CONFIG_PC_RESET_RELAY_GPIO) {
+        force_inactive_pin((gpio_num_t)CONFIG_PC_RESET_RELAY_GPIO);
+    }
+
+    esp_err_t err = configure_relay_gpio(s_power_gpio);
     if (err != ESP_OK) {
         return err;
     }
-    err = configure_relay_gpio(RESET_RELAY_GPIO);
+    err = configure_relay_gpio(s_reset_gpio);
     if (err != ESP_OK) {
         return err;
     }
@@ -108,6 +143,55 @@ esp_err_t relay_controller_init(void)
     ESP_LOGI(TAG, "Relay controller ready (max hold %u ms, watchdog %u ms)",
              (unsigned)MAX_RELAY_HOLD_MS, (unsigned)RELAY_WATCHDOG_MS);
     return ESP_OK;
+}
+
+esp_err_t relay_controller_set_pins(uint8_t power_gpio, uint8_t reset_gpio)
+{
+    if (!waketype_gpio_allowed(power_gpio) || !waketype_gpio_allowed(reset_gpio) ||
+        power_gpio == reset_gpio) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    relay_controller_release_all();
+
+    const gpio_num_t old_pwr = s_power_gpio;
+    const gpio_num_t old_rst = s_reset_gpio;
+
+    esp_err_t err = configure_relay_gpio((gpio_num_t)power_gpio);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = configure_relay_gpio((gpio_num_t)reset_gpio);
+    if (err != ESP_OK) {
+        configure_relay_gpio(old_pwr);
+        configure_relay_gpio(old_rst);
+        return err;
+    }
+
+    s_power_gpio = (gpio_num_t)power_gpio;
+    s_reset_gpio = (gpio_num_t)reset_gpio;
+    relay_force_inactive_both();
+
+    if (old_pwr != s_power_gpio && old_pwr != s_reset_gpio) {
+        force_inactive_pin(old_pwr);
+    }
+    if (old_rst != s_power_gpio && old_rst != s_reset_gpio && old_rst != old_pwr) {
+        force_inactive_pin(old_rst);
+    }
+
+    ESP_LOGI(TAG, "Relay pins now POWER=GPIO%u RESET=GPIO%u",
+             (unsigned)power_gpio, (unsigned)reset_gpio);
+    return ESP_OK;
+}
+
+int relay_controller_power_gpio(void)
+{
+    return (int)s_power_gpio;
+}
+
+int relay_controller_reset_gpio(void)
+{
+    return (int)s_reset_gpio;
 }
 
 esp_err_t relay_controller_release_all(void)
