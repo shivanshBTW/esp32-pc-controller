@@ -40,13 +40,8 @@ static const char *PAGE_SHELL_HEAD =
     "small{color:var(--muted)}"
     ".keybox{display:flex;gap:.5rem;align-items:stretch}.keybox input{flex:1}"
     ".keybox button{width:auto;margin-top:0;padding:.65rem .9rem}"
-    "</style></head><body>"
-    "<header><div class=brand>WakeType</div><nav>"
-    "<a id=navHome href=/>Home</a><a id=navSettings href=/settings>Settings</a><a id=navOta href=/ota>Update</a>"
-    "</nav></header><main>";
-
-static const char *PAGE_SHELL_FOOT =
-    "</main><script>"
+    "</style>"
+    "<script>"
     "const TKEY='waketype_device_key';"
     "function tok(){return localStorage.getItem(TKEY)||''}"
     "function setTok(t){t=(t||'').trim(); if(!t) return false; localStorage.setItem(TKEY,t);"
@@ -59,12 +54,6 @@ static const char *PAGE_SHELL_FOOT =
     "  return false;"
     "}"
     "absorbKeyFromUrl();"
-    "document.addEventListener('DOMContentLoaded',()=>{"
-    "  document.querySelectorAll('#deviceKey').forEach(el=>{"
-    "    el.addEventListener('change',()=>setTok(el.value));"
-    "    el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault(); setTok(el.value);}});"
-    "  });"
-    "});"
     "async function api(path,opt={}){"
     "  const h=Object.assign({'Content-Type':'application/json'},opt.headers||{});"
     "  if(tok()) h['Authorization']='Bearer '+tok();"
@@ -78,8 +67,21 @@ static const char *PAGE_SHELL_FOOT =
     "  const dd=document.createElement('dd');dd.textContent=(v==null||v==='')?'—':String(v); dl.appendChild(dt); dl.appendChild(dd);});}"
     "function banner(id,text,cls){const el=document.getElementById(id); if(!el)return; el.className='banner '+(cls||''); el.textContent=text||''; el.style.display=text?'block':'none'}"
     "function markNav(){const p=location.pathname; [['navHome','/'],['navSettings','/settings'],['navOta','/ota']].forEach(([id,path])=>{const a=document.getElementById(id); if(a) a.classList.toggle('active', p===path);});}"
-    "markNav();"
-    "</script></body></html>";
+    "document.addEventListener('DOMContentLoaded',()=>{"
+    "  markNav();"
+    "  document.querySelectorAll('#deviceKey').forEach(el=>{"
+    "    if(tok() && !el.value) el.value=tok();"
+    "    el.addEventListener('change',()=>setTok(el.value));"
+    "    el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault(); setTok(el.value);}});"
+    "  });"
+    "});"
+    "</script></head><body>"
+    "<header><div class=brand>WakeType</div><nav>"
+    "<a id=navHome href=/>Home</a><a id=navSettings href=/settings>Settings</a><a id=navOta href=/ota>Update</a>"
+    "</nav></header><main>";
+
+static const char *PAGE_SHELL_FOOT =
+    "</main></body></html>";
 
 static esp_err_t send_html(httpd_req_t *req, const char *body)
 {
@@ -188,7 +190,7 @@ static esp_err_t handle_settings(httpd_req_t *req)
         "</div>"
         "<label>Choose network</label><select id=ssidList><option value=\"\">— scan first —</option></select>"
         "<label>Or type SSID</label><input id=ssidManual placeholder=\"Network name\">"
-        "<label>Password</label><input id=pass type=password placeholder=\"Wi‑Fi password\">"
+        "<label>Password</label><input id=pass name=wifi-password type=password autocomplete=new-password placeholder=\"Wi‑Fi password\">"
         "<button type=button onclick=\"saveWifi()\">Connect to this network</button>"
         "<div id=wifiMsg class=banner style=display:none></div>"
         "<small>After connecting, open <b>http://waketype.local/settings</b>. "
@@ -248,7 +250,7 @@ static esp_err_t handle_settings(httpd_req_t *req)
         "</section>"
 
         "<script>"
-        "deviceKey.value=tok();"
+        "if(tok()) deviceKey.value=tok();"
         "async function load(){"
         "  try{"
         "    const j=await api('/api/v1/settings');"
@@ -351,7 +353,7 @@ static esp_err_t handle_ota_page(httpd_req_t *req)
         "<div id=m class=banner style=display:none></div>"
         "</section>"
         "<script>"
-        "deviceKey.value=tok();"
+        "if(tok()) deviceKey.value=tok();"
         "async function upload(){"
         "  const f=file.files[0]; if(!f){banner('m','Choose a .bin file','bad'); return;}"
         "  if(!tok()){banner('m','Save the device key first','bad'); return;}"
