@@ -113,6 +113,11 @@ int pc_state_gpio(void)
     return s_gpio;
 }
 
+int pc_state_raw_level(void)
+{
+    return gpio_get_level(s_gpio);
+}
+
 pc_power_state_t pc_state_get(void)
 {
     return s_state;

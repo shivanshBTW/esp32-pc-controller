@@ -130,8 +130,11 @@ static esp_err_t handle_home(httpd_req_t *req)
         "    connPill.textContent=j.wifi_connected?('Wi‑Fi: '+(j.wifi_ssid||'connected')):(j.setup_mode?'Setup hotspot':'Wi‑Fi: offline');"
         "    connPill.className='pill '+(j.wifi_connected?'on':(j.setup_mode?'warn':'off'));"
         "    pcPill.textContent='PC: '+(j.pc_state||'?');"
-        "    pcPill.className='pill';"
+        "    pcPill.className='pill '+(j.pc_state==='ON'?'on':(j.pc_state==='OFF'?'off':''));"
         "    setDl(sumDl,["
+        "      ['PC', j.pc_state||'—'],"
+        "      ['Sense pin', j.pc_state_gpio!=null?('GPIO '+j.pc_state_gpio):'—'],"
+        "      ['Sense level', j.pc_state_raw===0?'LOW (should be ON)':(j.pc_state_raw===1?'HIGH (should be OFF)':'—')],"
         "      ['Network', j.wifi_ssid||'—'],"
         "      ['IP', j.ip||'—'],"
         "      ['Mode', j.wifi_mode+(j.wifi_use_static?' · static':' · DHCP')],"
@@ -148,7 +151,7 @@ static esp_err_t handle_home(httpd_req_t *req)
         "    banner('pcmsg', j.ok?'Done.':'Error: '+(j.error||''), j.ok?'ok':'bad'); refresh();}"
         "  catch(e){banner('pcmsg', e.message,'bad');}"
         "}"
-        "refresh();"
+        "refresh(); setInterval(refresh,2000);"
         "</script>");
 }
 

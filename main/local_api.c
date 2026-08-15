@@ -150,6 +150,7 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "power_relay_gpio", relay_controller_power_gpio());
     cJSON_AddNumberToObject(root, "reset_relay_gpio", relay_controller_reset_gpio());
     cJSON_AddNumberToObject(root, "pc_state_gpio", pc_state_gpio());
+    cJSON_AddNumberToObject(root, "pc_state_raw", pc_state_raw_level());
     cJSON_AddBoolToObject(root, "local_lock", pc_controller_is_local_lock());
     cJSON_AddBoolToObject(root, "hid_ready", hid_controller_is_ready());
     cJSON_AddStringToObject(root, "matter", "stub");

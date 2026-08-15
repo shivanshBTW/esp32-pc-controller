@@ -21,6 +21,9 @@ esp_err_t pc_state_set_gpio(uint8_t gpio);
 
 int pc_state_gpio(void);
 
+/** Live 0/1 on the sense GPIO (1 = pulled up / LED off for default wiring). */
+int pc_state_raw_level(void);
+
 /** Latest interpreted state from PC817 feedback (not inferred from relay presses). */
 pc_power_state_t pc_state_get(void);
 
