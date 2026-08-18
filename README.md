@@ -95,7 +95,7 @@ Web UI pages: `/` (status + controls + Wi‑Fi), `/settings`, `/ota`.
 
 mDNS: `waketype.local`, service `_waketype._tcp`.
 
-## Home Assistant / Google Assistant (no Nest hub)
+## Home Assistant / Google Assistant
 
 YAML in [`homeassistant/`](homeassistant/) talks to this API over the LAN.
 
@@ -126,8 +126,6 @@ google_assistant: !include google_assistant.yaml
 Merge `waketype_bearer` into `config/secrets.yaml` (do not commit it). Restart HA, then say **“Hey Google, sync my devices.”**
 
 Dashboard buttons: **Press PC power**, **Reset the PC**, **Force shut down**, plus **Bedroom PC** (on/off). Google: those actions as scenes behind **PC controls**, **PC power** as an open/closed tile.
-
-If Home Assistant still shows `switch.bedroom_pc_switch`, delete that leftover device.
 
 ## Dry-test relays (before motherboard wiring)
 

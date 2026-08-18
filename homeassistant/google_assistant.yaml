@@ -13,11 +13,6 @@ exposed_domains:
   - switch
   - light
 entity_config:
-  # Leftover HA entities if the old board device was never deleted:
-  switch.bedroom_pc_switch:
-    expose: false
-  button.bedroom_pc_switch_identify:
-    expose: false
   button.press_pc_power:
     expose: false
   button.reset_the_pc:

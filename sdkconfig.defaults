@@ -20,7 +20,7 @@ CONFIG_HTTPD_MAX_URI_LEN=512
 
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
-# OTA dual-slot partition table (layout kept so OTA from older images still works)
+# OTA dual-slot partition table
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
@@ -29,5 +29,4 @@ CONFIG_PARTITION_TABLE_OFFSET=0x8000
 # mDNS
 CONFIG_MDNS_MAX_SERVICES=10
 
-# Bluetooth is not used
 CONFIG_BT_ENABLED=n
