@@ -1,6 +1,5 @@
 #include "mdns_service.h"
 #include "configuration.h"
-#include "matter_controller.h"
 #include "nvs_prefs.h"
 #include "pc_controller.h"
 #include "pc_state.h"
@@ -76,7 +75,6 @@ void mdns_service_update_txt(void)
         {.key = "api", .value = api},
         {.key = "product", .value = PRODUCT_NAME},
         {.key = "pc_state", .value = state},
-        {.key = "matter", .value = matter_controller_is_commissioned() ? "yes" : "pairing"},
     };
     mdns_service_txt_set(MDNS_SERVICE_TYPE, MDNS_SERVICE_PROTO, txt, sizeof(txt) / sizeof(txt[0]));
 }

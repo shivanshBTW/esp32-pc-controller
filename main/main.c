@@ -2,7 +2,6 @@
 #include "diagnostics.h"
 #include "hid_controller.h"
 #include "local_api.h"
-#include "matter_controller.h"
 #include "network.h"
 #include "nvs_prefs.h"
 #include "pc_controller.h"
@@ -21,11 +20,10 @@ void app_main(void)
     /*
      * Boot order (safety first):
      * 1 NVS prefs (needed for GPIO pin choices)
-     * 2-4 relays safe/off on those pins
+     * 2-4 Relays safe/off on those pins
      * 5 PC-state / HID
-     * 6-7 networking (STA or SoftAP)
-     * 8 local API + web UI
-     * 9 Matter On/Off (short power press)
+     * 6-7 Networking (STA or SoftAP)
+     * 8 Local API + web UI
      */
 
     esp_err_t nvs = nvs_flash_init();
@@ -47,7 +45,6 @@ void app_main(void)
 
     ESP_ERROR_CHECK(network_init());
     local_api_start();
-    matter_controller_start();
 
     ESP_LOGI(TAG, "Boot complete. Relays released. Physical PC buttons unaffected.");
 }

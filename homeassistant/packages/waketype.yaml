@@ -1,4 +1,4 @@
-# WakeType LAN HTTP — buttons + PC on/off (not the Matter switch).
+# WakeType LAN HTTP — buttons + PC on/off.
 # Google scenes are gated: turn on PC controls, then 1 minute to activate.
 # HA dashboard buttons stay ungated.
 #

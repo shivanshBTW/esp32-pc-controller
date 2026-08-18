@@ -1,7 +1,6 @@
 #include "network.h"
 #include "captive_dns.h"
 #include "configuration.h"
-#include "matter_controller.h"
 #include "mdns_service.h"
 #include "nvs_prefs.h"
 
@@ -228,7 +227,6 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (id == IP_EVENT_GOT_IP6) {
         network_ensure_ipv6();
         ESP_LOGI(TAG, "STA IPv6 %s", network_ipv6_linklocal());
-        matter_controller_on_sta_ip();
         return;
     }
     if (id != IP_EVENT_STA_GOT_IP) {
@@ -247,7 +245,6 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     ESP_LOGI(TAG, "STA connected, IP %s", s_ip);
     network_ensure_ipv6();
     mdns_service_start();
-    matter_controller_on_sta_ip();
 }
 
 esp_err_t network_prepare(void)
@@ -285,22 +282,6 @@ esp_err_t network_prepare(void)
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, &on_ip, NULL));
     s_prepared = true;
     return ESP_OK;
-}
-
-/*
- * CHIP calls esp_wifi_init() again from esp_matter::start(). If the driver is
- * already up, that returns ESP_ERR_INVALID_STATE and Matter never starts.
- */
-esp_err_t __real_esp_wifi_init(const wifi_init_config_t *config);
-
-esp_err_t __wrap_esp_wifi_init(const wifi_init_config_t *config)
-{
-    wifi_mode_t mode;
-    if (esp_wifi_get_mode(&mode) != ESP_ERR_WIFI_NOT_INIT) {
-        ESP_LOGI(TAG, "Wi-Fi already initialized — Matter will reuse it");
-        return ESP_OK;
-    }
-    return __real_esp_wifi_init(config);
 }
 
 esp_err_t network_init(void)

@@ -34,7 +34,7 @@ typedef enum {
 
 esp_err_t hid_controller_init(void);
 
-/** Send a predefined key/combo. Not exposed via Matter. */
+/** Send a predefined key/combo. */
 esp_err_t hid_controller_send(hid_command_t cmd);
 
 bool hid_controller_is_ready(void);

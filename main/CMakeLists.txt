@@ -12,7 +12,6 @@ idf_component_register(
         "local_api.c"
         "web_ui.c"
         "ota_http.c"
-        "matter_controller.cpp"
         "diagnostics.c"
     INCLUDE_DIRS
         "."
@@ -29,8 +28,6 @@ idf_component_register(
         json
         mdns
         lwip
-        bt
-        esp_matter
 )
 
 # Optional local secrets.env (repo root), like a JS .env — never commit.
@@ -66,5 +63,3 @@ endif()
 if(_wt_force_key STREQUAL "1" OR _wt_force_key STREQUAL "true" OR _wt_force_key STREQUAL "yes")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE WAKETYPE_FORCE_DEVICE_KEY=1)
 endif()
-
-target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_wifi_init")

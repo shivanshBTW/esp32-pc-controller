@@ -17,9 +17,6 @@ static bool command_blocked(pc_cmd_source_t source)
     if (source == PC_CMD_SOURCE_INTERNAL) {
         return false;
     }
-    if (source == PC_CMD_SOURCE_MATTER) {
-        return true;
-    }
     /* LOCAL_API */
     return s->local_lock_blocks_api;
 }

@@ -11,7 +11,6 @@ extern "C" {
 
 typedef enum {
     PC_CMD_SOURCE_LOCAL_API = 0,
-    PC_CMD_SOURCE_MATTER,
     PC_CMD_SOURCE_INTERNAL,
 } pc_cmd_source_t;
 

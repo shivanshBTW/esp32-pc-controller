@@ -29,8 +29,7 @@ Relays default to **active-low**. Example alternate wiring: 13 / 14 / 6.
 - POWER/RESET mutual exclusion
 - Emergency `POST /api/v1/pc/release`
 - OTA forces relays OFF before flashing
-- Local lock can block Matter/API remote commands; physical case buttons still work
-- Matter (Google Home) exposes **short power press only** (On/Off based on PC LED sense)
+- Local lock can block API remote commands; physical case buttons still work
 
 ## Device key (`secrets.env`)
 
@@ -98,7 +97,7 @@ mDNS: `waketype.local`, service `_waketype._tcp`.
 
 ## Home Assistant / Google Assistant (no Nest hub)
 
-YAML in [`homeassistant/`](homeassistant/) talks to this API over the LAN. Matter is not used.
+YAML in [`homeassistant/`](homeassistant/) talks to this API over the LAN.
 
 On the Ubuntu host (the folder that already has `compose.yaml` and `config/`):
 
@@ -126,43 +125,9 @@ google_assistant: !include google_assistant.yaml
 
 Merge `waketype_bearer` into `config/secrets.yaml` (do not commit it). Restart HA, then say **“Hey Google, sync my devices.”**
 
-Dashboard buttons: **Press PC power**, **Reset the PC**, **Force shut down**, plus **Bedroom PC** (on/off). Google: those buttons as scenes, **PC power** as an open/closed tile, Matter `switch.bedroom_pc_switch` hidden.
+Dashboard buttons: **Press PC power**, **Reset the PC**, **Force shut down**, plus **Bedroom PC** (on/off). Google: those actions as scenes behind **PC controls**, **PC power** as an open/closed tile.
 
-## Matter / Google Home
-
-Needs a **Google Matter controller** on the same Wi‑Fi (Nest Hub, Nest Mini 2nd gen, Pixel Tablet, Google TV, etc.). The phone app alone is not enough.
-
-1. USB-flash this firmware once (partition table grew for Matter — OTA cannot do that first jump). Wi‑Fi settings will be wiped; join `WakeType-Setup` again if needed.
-2. On a Mac with ESP-IDF **and** ESP-Matter:
-
-```bash
-# one-time SDK (IDF v5.3.2)
-. $HOME/esp/esp-idf/export.sh
-git clone --depth 1 -b release/v1.4.2 https://github.com/espressif/esp-matter.git $HOME/esp/esp-matter
-cd $HOME/esp/esp-matter
-git submodule update --init --depth 1
-cd connectedhomeip/connectedhomeip
-./scripts/checkout_submodules.py --platform esp32 darwin --shallow
-cd ../..
-./install.sh
-```
-
-```bash
-. $HOME/esp/esp-idf/export.sh
-. $HOME/esp/esp-matter/export.sh
-cd /path/to/esp32-pc-controller
-export ESP_MATTER_PATH=$HOME/esp/esp-matter
-idf.py build
-idf.py -p /dev/cu.usbmodem* flash
-```
-
-3. Open `http://waketype.local/settings` → **Google Home (Matter)**.
-4. Phone: Google Home → **Add** → **Matter-enabled device** → **Set up without QR** → type the **manual pairing code**. Bluetooth on. Stand near the ESP32.
-5. “Turn on WakeType PC” / “Turn off …” runs a **short power button**. If the PC is already on, “turn on” does nothing. Reset and long-hold are **not** in Google Home.
-
-**Open pairing for 15 minutes** if Home cannot find it. Leave the optocoupler jumper off so PC state stays accurate.
-
-Test vendor IDs (`0xFFF1`) work for development. Shipping products need CSA certification.
+If Home Assistant still shows `switch.bedroom_pc_switch`, delete that leftover device.
 
 ## Dry-test relays (before motherboard wiring)
 
