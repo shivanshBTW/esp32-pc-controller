@@ -1,11 +1,10 @@
 # WakeType LAN HTTP — buttons + PC on/off (not the Matter switch).
-# Drop this file in /config/packages/waketype.yaml
-# and add to configuration.yaml if you do not already use packages:
+# Google scenes are gated: turn on PC controls, then 1 minute to activate.
+# HA dashboard buttons stay ungated.
 #
+# Drop in /config/packages/waketype.yaml and:
 #   homeassistant:
 #     packages: !include_dir_named packages
-#
-# Then merge secrets.yaml.example into /config/secrets.yaml and restart.
 
 rest:
   - resource: http://192.168.1.231/api/v1/status
@@ -47,6 +46,15 @@ rest_command:
       Content-Type: application/json
     payload: '{"duration_ms": 0}'
 
+input_boolean:
+  pc_controls:
+    name: PC controls
+    icon: mdi:shield-key
+
+timer:
+  pc_controls:
+    duration: "00:01:00"
+
 template:
   - binary_sensor:
       - name: PC power
@@ -73,3 +81,92 @@ template:
         icon: mdi:power-cycle
         press:
           - service: rest_command.waketype_power_hold
+
+script:
+  google_press_pc_power:
+    alias: Press PC power
+    icon: mdi:power
+    sequence:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.pc_controls
+                state: "on"
+            sequence:
+              - service: rest_command.waketype_power_press
+        default:
+          - service: persistent_notification.create
+            data:
+              title: WakeType
+              message: Turn on PC controls first. You then have 1 minute.
+
+  google_reset_the_pc:
+    alias: Reset the PC
+    icon: mdi:restart
+    sequence:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.pc_controls
+                state: "on"
+            sequence:
+              - service: rest_command.waketype_reset
+        default:
+          - service: persistent_notification.create
+            data:
+              title: WakeType
+              message: Turn on PC controls first. You then have 1 minute.
+
+  google_force_shut_down:
+    alias: Force shut down
+    icon: mdi:power-cycle
+    sequence:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.pc_controls
+                state: "on"
+            sequence:
+              - service: rest_command.waketype_power_hold
+        default:
+          - service: persistent_notification.create
+            data:
+              title: WakeType
+              message: Turn on PC controls first. You then have 1 minute.
+
+automation:
+  - id: waketype_pc_controls_on
+    alias: WakeType PC controls session start
+    trigger:
+      - platform: state
+        entity_id: input_boolean.pc_controls
+        to: "on"
+    action:
+      - service: timer.start
+        target:
+          entity_id: timer.pc_controls
+        data:
+          duration: "00:01:00"
+
+  - id: waketype_pc_controls_off
+    alias: WakeType PC controls session end
+    trigger:
+      - platform: state
+        entity_id: input_boolean.pc_controls
+        to: "off"
+    action:
+      - service: timer.cancel
+        target:
+          entity_id: timer.pc_controls
+
+  - id: waketype_pc_controls_timeout
+    alias: WakeType PC controls auto lock
+    trigger:
+      - platform: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.pc_controls
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.pc_controls
