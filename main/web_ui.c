@@ -294,6 +294,7 @@ static esp_err_t handle_settings(httpd_req_t *req)
         "    ]);"
         "    matterCode.textContent=j.matter_pairing_code||'—';"
         "    matterQr.textContent=j.matter_qr||'—';"
+        "    if(!j.matter_ready){banner('matterMsg','Matter is not running'+(j.matter_error?(' ('+j.matter_error+')'):'')+'. Update firmware, then try again.','bad');}"
         "    if(j.wifi_ssid) ssidManual.value=j.wifi_ssid;"
         "  }catch(e){"
         "    banner('authBanner', e.message,'bad');"

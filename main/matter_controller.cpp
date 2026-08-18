@@ -22,6 +22,12 @@ static uint16_t s_endpoint_id;
 static bool s_ready;
 static char s_manual[32];
 static char s_qr[256];
+static char s_last_error[48];
+
+static void set_last_error(esp_err_t err)
+{
+    strlcpy(s_last_error, err == ESP_OK ? "" : esp_err_to_name(err), sizeof(s_last_error));
+}
 
 static void cache_pairing_codes(void)
 {
@@ -155,6 +161,7 @@ extern "C" esp_err_t matter_controller_start(void)
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
     if (!node) {
         ESP_LOGE(TAG, "Failed to create Matter node");
+        set_last_error(ESP_FAIL);
         return ESP_FAIL;
     }
 
@@ -163,6 +170,7 @@ extern "C" esp_err_t matter_controller_start(void)
     endpoint_t *endpoint = on_off_plugin_unit::create(node, &plug_config, ENDPOINT_FLAG_NONE, nullptr);
     if (!endpoint) {
         ESP_LOGE(TAG, "Failed to create On/Off plugin endpoint");
+        set_last_error(ESP_FAIL);
         return ESP_FAIL;
     }
     s_endpoint_id = endpoint::get_id(endpoint);
@@ -170,8 +178,10 @@ extern "C" esp_err_t matter_controller_start(void)
     esp_err_t err = esp_matter::start(app_event_cb);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_matter::start failed (%s)", esp_err_to_name(err));
+        set_last_error(err);
         return err;
     }
+    set_last_error(ESP_OK);
 
     cache_pairing_codes();
     s_ready = true;
@@ -191,6 +201,11 @@ extern "C" bool matter_controller_is_commissioned(void)
         return false;
     }
     return chip::Server::GetInstance().GetFabricTable().FabricCount() > 0;
+}
+
+extern "C" const char *matter_controller_last_error(void)
+{
+    return s_last_error;
 }
 
 extern "C" const char *matter_manual_pairing_code(void)

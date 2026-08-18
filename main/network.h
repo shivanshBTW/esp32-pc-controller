@@ -15,6 +15,10 @@ typedef struct {
     uint8_t authmode;
 } wifi_scan_ap_t;
 
+/** Create STA/AP netifs and event handlers. Does not start the Wi-Fi driver. */
+esp_err_t network_prepare(void);
+
+/** Init Wi-Fi if needed, then join saved STA or open SoftAP. Calls prepare(). */
 esp_err_t network_init(void);
 
 bool network_is_sta_connected(void);

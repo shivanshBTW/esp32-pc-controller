@@ -66,3 +66,5 @@ endif()
 if(_wt_force_key STREQUAL "1" OR _wt_force_key STREQUAL "true" OR _wt_force_key STREQUAL "yes")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE WAKETYPE_FORCE_DEVICE_KEY=1)
 endif()
+
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_wifi_init")

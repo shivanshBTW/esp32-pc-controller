@@ -47,7 +47,6 @@ void app_main(void)
 
     ESP_ERROR_CHECK(network_init());
     local_api_start();
-
     matter_controller_start();
 
     ESP_LOGI(TAG, "Boot complete. Relays released. Physical PC buttons unaffected.");

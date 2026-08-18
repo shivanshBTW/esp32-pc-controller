@@ -23,6 +23,7 @@ static const char *TAG = "net";
 static EventGroupHandle_t s_events;
 static esp_netif_t *s_sta_netif;
 static esp_netif_t *s_ap_netif;
+static bool s_prepared;
 static bool s_sta_connected;
 static bool s_ap_active;
 static bool s_want_sta;
@@ -131,7 +132,12 @@ static esp_err_t start_ap(void)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    {
+        esp_err_t start = esp_wifi_start();
+        if (start != ESP_OK && start != ESP_ERR_INVALID_STATE) {
+            return start;
+        }
+    }
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     s_ap_active = true;
@@ -169,7 +175,12 @@ static esp_err_t start_sta(const char *ssid, const char *password)
     apply_hostname();
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    {
+        esp_err_t start = esp_wifi_start();
+        if (start != ESP_OK && start != ESP_ERR_INVALID_STATE) {
+            return start;
+        }
+    }
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     /* Never abort boot on bad static IP — fall back to DHCP inside helper. */
     if (apply_static_or_dhcp() != ESP_OK) {
@@ -229,28 +240,75 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     mdns_service_start();
 }
 
-esp_err_t network_init(void)
+esp_err_t network_prepare(void)
 {
+    if (s_prepared) {
+        return ESP_OK;
+    }
+
     s_events = xEventGroupCreate();
     if (!s_events) {
         return ESP_ERR_NO_MEM;
     }
 
     ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    s_sta_netif = esp_netif_create_default_wifi_sta();
-    s_ap_netif = esp_netif_create_default_wifi_ap();
+    esp_err_t loop = esp_event_loop_create_default();
+    if (loop != ESP_OK && loop != ESP_ERR_INVALID_STATE) {
+        return loop;
+    }
+
+    s_sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!s_sta_netif) {
+        s_sta_netif = esp_netif_create_default_wifi_sta();
+    }
+    s_ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (!s_ap_netif) {
+        s_ap_netif = esp_netif_create_default_wifi_ap();
+    }
+    if (!s_sta_netif || !s_ap_netif) {
+        return ESP_FAIL;
+    }
     apply_hostname();
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_ip, NULL));
+    s_prepared = true;
+    return ESP_OK;
+}
+
+/*
+ * CHIP calls esp_wifi_init() again from esp_matter::start(). If the driver is
+ * already up, that returns ESP_ERR_INVALID_STATE and Matter never starts.
+ */
+esp_err_t __real_esp_wifi_init(const wifi_init_config_t *config);
+
+esp_err_t __wrap_esp_wifi_init(const wifi_init_config_t *config)
+{
+    wifi_mode_t mode;
+    if (esp_wifi_get_mode(&mode) != ESP_ERR_WIFI_NOT_INIT) {
+        ESP_LOGI(TAG, "Wi-Fi already initialized — Matter will reuse it");
+        return ESP_OK;
+    }
+    return __real_esp_wifi_init(config);
+}
+
+esp_err_t network_init(void)
+{
+    esp_err_t err = network_prepare();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    err = esp_wifi_init(&cfg);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
+    }
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
     const waketype_settings_t *s = nvs_prefs_get();
     if (s->wifi_ssid[0] != '\0') {
-        esp_err_t err = start_sta(s->wifi_ssid, s->wifi_password);
+        err = start_sta(s->wifi_ssid, s->wifi_password);
         if (err != ESP_OK) {
             return start_ap();
         }

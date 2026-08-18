@@ -16,6 +16,8 @@ esp_err_t matter_controller_start(void);
 
 bool matter_controller_is_ready(void);
 bool matter_controller_is_commissioned(void);
+/** Empty when start succeeded; otherwise an esp_err name. */
+const char *matter_controller_last_error(void);
 
 /** Manual pairing code (e.g. 34970112332). Empty until Matter starts. */
 const char *matter_manual_pairing_code(void);

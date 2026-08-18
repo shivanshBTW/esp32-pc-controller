@@ -157,6 +157,9 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "matter_ready", matter_controller_is_ready());
     cJSON_AddBoolToObject(root, "matter_commissioned", matter_controller_is_commissioned());
     cJSON_AddStringToObject(root, "matter", matter_controller_is_commissioned() ? "commissioned" : "pairing");
+    if (matter_controller_last_error()[0]) {
+        cJSON_AddStringToObject(root, "matter_error", matter_controller_last_error());
+    }
     if (setup || authorize(req)) {
         cJSON_AddStringToObject(root, "matter_pairing_code", matter_manual_pairing_code());
         cJSON_AddStringToObject(root, "matter_qr", matter_qr_payload());
@@ -274,6 +277,9 @@ static esp_err_t handle_settings_get(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "pc_state_gpio", s->pc_state_gpio);
     cJSON_AddBoolToObject(root, "matter_ready", matter_controller_is_ready());
     cJSON_AddBoolToObject(root, "matter_commissioned", matter_controller_is_commissioned());
+    if (matter_controller_last_error()[0]) {
+        cJSON_AddStringToObject(root, "matter_error", matter_controller_last_error());
+    }
     if (network_is_setup_mode() || authorize(req)) {
         cJSON_AddStringToObject(root, "device_key", s->api_token);
         cJSON_AddStringToObject(root, "api_token", s->api_token);
@@ -657,6 +663,16 @@ static esp_err_t handle_matter_commission(httpd_req_t *req)
 {
     if (!authorize(req)) {
         return reject_unauthorized(req);
+    }
+    if (!matter_controller_is_ready()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        const char *why = matter_controller_last_error();
+        cJSON *root = cJSON_CreateObject();
+        cJSON_AddBoolToObject(root, "ok", false);
+        cJSON_AddStringToObject(root, "error", why[0] ? why : "ESP_ERR_INVALID_STATE");
+        cJSON_AddStringToObject(root, "hint", "Matter is not running. Update firmware, then try pairing again.");
+        return send_json(req, root);
     }
     return send_result(req, matter_controller_open_commissioning_window());
 }
