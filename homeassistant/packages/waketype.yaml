@@ -60,16 +60,16 @@ template:
         unique_id: waketype_press_pc_power
         icon: mdi:power
         press:
-          - action: rest_command.waketype_power_press
+          - service: rest_command.waketype_power_press
 
       - name: Reset the PC
         unique_id: waketype_reset_the_pc
         icon: mdi:restart
         press:
-          - action: rest_command.waketype_reset
+          - service: rest_command.waketype_reset
 
       - name: Force shut down
         unique_id: waketype_force_shut_down
         icon: mdi:power-cycle
         press:
-          - action: rest_command.waketype_power_hold
+          - service: rest_command.waketype_power_hold
