@@ -1,9 +1,4 @@
-# Replace the google_assistant: mapping in configuration.yaml with:
-#
-#   google_assistant: !include google_assistant.yaml
-#
-# Google: PC controls switch (1 min window) + three gated scripts as scenes.
-# HA dashboard buttons are not sent to Google.
+# google_assistant: !include google_assistant.yaml
 
 project_id: ha-shivansh
 service_account: !include SERVICE_ACCOUNT.json
@@ -13,31 +8,18 @@ exposed_domains:
   - switch
   - light
 entity_config:
-  button.press_pc_power:
-    expose: false
-  button.reset_the_pc:
-    expose: false
-  button.force_shut_down:
-    expose: false
-  binary_sensor.bedroom_pc:
-    expose: false
   input_boolean.pc_controls:
     expose: true
-    name: PC controls
     room: Bedroom
   script.google_press_pc_power:
     expose: true
-    name: Press PC power
     room: Bedroom
   script.google_reset_the_pc:
     expose: true
-    name: Reset the PC
     room: Bedroom
   script.google_force_shut_down:
     expose: true
-    name: Force shut down
     room: Bedroom
   binary_sensor.pc_power:
     expose: true
-    name: PC power
     room: Bedroom
