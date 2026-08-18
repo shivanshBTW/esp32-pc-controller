@@ -1,6 +1,7 @@
 #include "network.h"
 #include "captive_dns.h"
 #include "configuration.h"
+#include "matter_controller.h"
 #include "mdns_service.h"
 #include "nvs_prefs.h"
 
@@ -29,6 +30,7 @@ static bool s_ap_active;
 static bool s_want_sta;
 static int s_retry;
 static char s_ip[16] = "0.0.0.0";
+static char s_ip6[48];
 static int s_rssi;
 
 static void apply_hostname(void)
@@ -223,6 +225,12 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     (void)base;
+    if (id == IP_EVENT_GOT_IP6) {
+        network_ensure_ipv6();
+        ESP_LOGI(TAG, "STA IPv6 %s", network_ipv6_linklocal());
+        matter_controller_on_sta_ip();
+        return;
+    }
     if (id != IP_EVENT_STA_GOT_IP) {
         return;
     }
@@ -237,7 +245,9 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     }
     xEventGroupSetBits(s_events, WIFI_CONNECTED_BIT);
     ESP_LOGI(TAG, "STA connected, IP %s", s_ip);
+    network_ensure_ipv6();
     mdns_service_start();
+    matter_controller_on_sta_ip();
 }
 
 esp_err_t network_prepare(void)
@@ -272,6 +282,7 @@ esp_err_t network_prepare(void)
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_ip, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_GOT_IP6, &on_ip, NULL));
     s_prepared = true;
     return ESP_OK;
 }
@@ -326,6 +337,44 @@ esp_err_t network_init(void)
 bool network_is_sta_connected(void)
 {
     return s_sta_connected;
+}
+
+esp_netif_t *network_sta_netif(void)
+{
+    return s_sta_netif;
+}
+
+void network_ensure_ipv6(void)
+{
+    if (!s_sta_netif) {
+        return;
+    }
+    esp_ip6_addr_t ip6;
+    if (esp_netif_get_ip6_linklocal(s_sta_netif, &ip6) == ESP_OK) {
+        snprintf(s_ip6, sizeof(s_ip6), IPV6STR, IPV62STR(ip6));
+        return;
+    }
+    esp_err_t err = esp_netif_create_ip6_linklocal(s_sta_netif);
+    if (err != ESP_OK && err != ESP_FAIL) {
+        ESP_LOGW(TAG, "IPv6 link-local: %s", esp_err_to_name(err));
+        return;
+    }
+    if (esp_netif_get_ip6_linklocal(s_sta_netif, &ip6) == ESP_OK) {
+        snprintf(s_ip6, sizeof(s_ip6), IPV6STR, IPV62STR(ip6));
+        ESP_LOGI(TAG, "STA IPv6 %s", s_ip6);
+    }
+}
+
+const char *network_ipv6_linklocal(void)
+{
+    if (!s_sta_netif) {
+        return "";
+    }
+    esp_ip6_addr_t ip6;
+    if (esp_netif_get_ip6_linklocal(s_sta_netif, &ip6) == ESP_OK) {
+        snprintf(s_ip6, sizeof(s_ip6), IPV6STR, IPV62STR(ip6));
+    }
+    return s_ip6;
 }
 
 bool network_is_ap_active(void)

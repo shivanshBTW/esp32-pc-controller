@@ -138,6 +138,7 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddStringToObject(root, "wifi_ssid", network_sta_ssid());
     cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
     cJSON_AddStringToObject(root, "ip", ipinfo.ip[0] ? ipinfo.ip : network_ip_string());
+    cJSON_AddStringToObject(root, "ipv6", network_ipv6_linklocal());
     cJSON_AddStringToObject(root, "gateway", ipinfo.gateway);
     cJSON_AddStringToObject(root, "netmask", ipinfo.netmask);
     cJSON_AddStringToObject(root, "dns1", ipinfo.dns1);

@@ -1,7 +1,9 @@
 #include "matter_controller.h"
 #include "pc_controller.h"
 #include "pc_state.h"
+#include "network.h"
 
+#include <app/server/Dnssd.h>
 #include <app/server/Server.h>
 #include <esp_log.h>
 #include <esp_matter.h>
@@ -122,6 +124,10 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
     case chip::DeviceLayer::DeviceEventType::kCommissioningComplete:
         ESP_LOGI(TAG, "Commissioning complete");
         break;
+    case chip::DeviceLayer::DeviceEventType::kInterfaceIpAddressChanged:
+        ESP_LOGI(TAG, "Matter IP changed — refresh DNS-SD");
+        chip::app::DnssdServer::Instance().StartServer();
+        break;
     case chip::DeviceLayer::DeviceEventType::kCommissioningWindowOpened:
         ESP_LOGI(TAG, "Commissioning window opened");
         cache_pairing_codes();
@@ -186,6 +192,7 @@ extern "C" esp_err_t matter_controller_start(void)
     cache_pairing_codes();
     s_ready = true;
     xTaskCreate(matter_state_task, "matter_st", 4096, NULL, 4, NULL);
+    matter_controller_on_sta_ip();
     ESP_LOGI(TAG, "Matter On/Off plugin ready (endpoint %u) — short powerPress only", s_endpoint_id);
     return ESP_OK;
 }
@@ -216,6 +223,39 @@ extern "C" const char *matter_manual_pairing_code(void)
 extern "C" const char *matter_qr_payload(void)
 {
     return s_qr;
+}
+
+static void announce_existing_wifi(intptr_t arg)
+{
+    (void)arg;
+    if (!s_ready || !network_is_sta_connected()) {
+        return;
+    }
+
+    network_ensure_ipv6();
+
+    ChipDeviceEvent wifi{};
+    wifi.Type = chip::DeviceLayer::DeviceEventType::kWiFiConnectivityChange;
+    wifi.WiFiConnectivityChange.Result = chip::DeviceLayer::kConnectivity_Established;
+    chip::DeviceLayer::PlatformMgr().PostEvent(&wifi);
+
+    ChipDeviceEvent ip{};
+    ip.Type = chip::DeviceLayer::DeviceEventType::kInterfaceIpAddressChanged;
+    ip.InterfaceIpAddressChanged.Type = chip::DeviceLayer::InterfaceIpChangeType::kIpV4_Assigned;
+    chip::DeviceLayer::PlatformMgr().PostEvent(&ip);
+    ip.InterfaceIpAddressChanged.Type = chip::DeviceLayer::InterfaceIpChangeType::kIpV6_Assigned;
+    chip::DeviceLayer::PlatformMgr().PostEvent(&ip);
+
+    chip::app::DnssdServer::Instance().StartServer();
+    ESP_LOGI(TAG, "Matter advertised on STA %s %s", network_ip_string(), network_ipv6_linklocal());
+}
+
+extern "C" void matter_controller_on_sta_ip(void)
+{
+    if (!s_ready) {
+        return;
+    }
+    chip::DeviceLayer::PlatformMgr().ScheduleWork(announce_existing_wifi, 0);
 }
 
 extern "C" esp_err_t matter_controller_open_commissioning_window(void)

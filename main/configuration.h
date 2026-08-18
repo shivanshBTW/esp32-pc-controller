@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 #define PRODUCT_NAME              "WakeType"
-#define FIRMWARE_VERSION          "0.3.2-dev"
+#define FIRMWARE_VERSION          "0.3.3-dev"
 #define CONFIG_SCHEMA_VERSION     2
 
 #define AP_SSID_DEFAULT           "WakeType-Setup"

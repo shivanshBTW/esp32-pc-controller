@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "esp_netif.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -31,6 +32,13 @@ const char *network_mode_string(void);
 /** Configured / currently associated STA SSID (empty if none). */
 const char *network_sta_ssid(void);
 int network_rssi(void);
+
+/** STA netif, or NULL. */
+esp_netif_t *network_sta_netif(void);
+/** Create IPv6 link-local on STA if missing. */
+void network_ensure_ipv6(void);
+/** fe80::… or empty. */
+const char *network_ipv6_linklocal(void);
 
 typedef struct {
     char ip[16];

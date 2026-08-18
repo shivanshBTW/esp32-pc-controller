@@ -28,6 +28,9 @@ const char *matter_qr_payload(void);
 /** Re-open BLE + DNS-SD pairing for 15 minutes. */
 esp_err_t matter_controller_open_commissioning_window(void);
 
+/** Call after STA has an IP so CHIP advertises Matter on the LAN. */
+void matter_controller_on_sta_ip(void);
+
 #ifdef __cplusplus
 }
 #endif
