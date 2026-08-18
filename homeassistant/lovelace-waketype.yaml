@@ -1,5 +1,5 @@
-# Paste as a dashboard view (Settings → Dashboards → three dots → Raw configuration)
-# or add the card under an existing Bedroom view.
+# Dashboard view only — Home Assistant does not load this file.
+# Optional: paste into Settings → Dashboards → ⋮ → Raw configuration editor.
 
 title: Bedroom PC
 path: bedroom-pc

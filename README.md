@@ -108,7 +108,8 @@ On the Ubuntu host (the folder that already has `compose.yaml` and `config/`):
 # on the HA machine, from the homeassistant/ directory that contains compose.yaml
 mkdir -p config/packages
 # copy packages/waketype.yaml → config/packages/
-# copy google_assistant.yaml and merge secrets.yaml into config/
+# copy google_assistant.yaml and configuration.yaml into config/
+# merge secrets.yaml into config/ (do not replace the whole file)
 ```
 
 In `config/configuration.yaml`, add `packages` under the existing `homeassistant:` block (do not add a second `homeassistant:` key):
