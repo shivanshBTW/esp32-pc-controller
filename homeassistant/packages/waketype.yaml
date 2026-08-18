@@ -1,6 +1,4 @@
-# /config/packages/waketype.yaml
-#   homeassistant:
-#     packages: !include_dir_named packages
+# /config/packages/waketype.yaml  — the only file that belongs in packages/
 #
 # Dashboard buttons: ungated. Google scenes: PC controls on, then 1 minute.
 
@@ -21,7 +19,7 @@ rest_command:
     url: http://192.168.1.231/api/v1/pc/power
     method: POST
     timeout: 15
-    headers: &wt_headers
+    headers:
       Authorization: !secret waketype_bearer
       Content-Type: application/json
     payload: "{}"
@@ -30,14 +28,18 @@ rest_command:
     url: http://192.168.1.231/api/v1/pc/reset
     method: POST
     timeout: 15
-    headers: *wt_headers
+    headers:
+      Authorization: !secret waketype_bearer
+      Content-Type: application/json
     payload: "{}"
 
   waketype_power_hold:
     url: http://192.168.1.231/api/v1/pc/power/hold
     method: POST
     timeout: 20
-    headers: *wt_headers
+    headers:
+      Authorization: !secret waketype_bearer
+      Content-Type: application/json
     payload: '{"duration_ms": 0}'
 
 input_boolean:
@@ -82,13 +84,13 @@ script:
     icon: mdi:power
     sequence:
       - choose:
-          - conditions: &pc_unlocked
+          - conditions:
               - condition: state
                 entity_id: input_boolean.pc_controls
                 state: "on"
             sequence:
               - service: rest_command.waketype_power_press
-        default: &pc_locked
+        default:
           - service: persistent_notification.create
             data:
               title: WakeType
@@ -99,20 +101,34 @@ script:
     icon: mdi:restart
     sequence:
       - choose:
-          - conditions: *pc_unlocked
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.pc_controls
+                state: "on"
             sequence:
               - service: rest_command.waketype_reset
-        default: *pc_locked
+        default:
+          - service: persistent_notification.create
+            data:
+              title: WakeType
+              message: Turn on PC controls first. You then have 1 minute.
 
   google_force_shut_down:
     alias: Force shut down
     icon: mdi:power-cycle
     sequence:
       - choose:
-          - conditions: *pc_unlocked
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.pc_controls
+                state: "on"
             sequence:
               - service: rest_command.waketype_power_hold
-        default: *pc_locked
+        default:
+          - service: persistent_notification.create
+            data:
+              title: WakeType
+              message: Turn on PC controls first. You then have 1 minute.
 
 automation:
   - id: waketype_pc_controls_on

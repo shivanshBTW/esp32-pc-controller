@@ -1,5 +1,5 @@
-# Dashboard view only — Home Assistant does not load this file.
-# Optional: paste into Settings → Dashboards → ⋮ → Raw configuration editor.
+# Optional dashboard snippet. Do NOT copy this into config/packages/.
+# Paste into Settings → Dashboards → ⋮ → Raw configuration editor.
 
 title: Bedroom PC
 path: bedroom-pc
