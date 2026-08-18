@@ -12,7 +12,7 @@ idf_component_register(
         "local_api.c"
         "web_ui.c"
         "ota_http.c"
-        "matter_controller.c"
+        "matter_controller.cpp"
         "diagnostics.c"
     INCLUDE_DIRS
         "."
@@ -29,6 +29,8 @@ idf_component_register(
         json
         mdns
         lwip
+        bt
+        esp_matter
 )
 
 # Optional local secrets.env (repo root), like a JS .env — never commit.

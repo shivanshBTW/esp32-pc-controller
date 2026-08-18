@@ -25,7 +25,7 @@ void app_main(void)
      * 5 PC-state / HID
      * 6-7 networking (STA or SoftAP)
      * 8 local API + web UI
-     * 9 Matter stub
+     * 9 Matter On/Off (short power press)
      */
 
     esp_err_t nvs = nvs_flash_init();

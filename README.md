@@ -30,6 +30,7 @@ Relays default to **active-low**. Example alternate wiring: 13 / 14 / 6.
 - Emergency `POST /api/v1/pc/release`
 - OTA forces relays OFF before flashing
 - Local lock can block Matter/API remote commands; physical case buttons still work
+- Matter (Google Home) exposes **short power press only** (On/Off based on PC LED sense)
 
 ## Device key (`secrets.env`)
 
@@ -95,6 +96,42 @@ Web UI pages: `/` (status + controls + Wi‑Fi), `/settings`, `/ota`.
 
 mDNS: `waketype.local`, service `_waketype._tcp`.
 
+## Matter / Google Home
+
+Needs a **Google Matter controller** on the same Wi‑Fi (Nest Hub, Nest Mini 2nd gen, Pixel Tablet, Google TV, etc.). The phone app alone is not enough.
+
+1. USB-flash this firmware once (partition table grew for Matter — OTA cannot do that first jump). Wi‑Fi settings will be wiped; join `WakeType-Setup` again if needed.
+2. On a Mac with ESP-IDF **and** ESP-Matter:
+
+```bash
+# one-time SDK (IDF v5.3.2)
+. $HOME/esp/esp-idf/export.sh
+git clone --depth 1 -b release/v1.4.2 https://github.com/espressif/esp-matter.git $HOME/esp/esp-matter
+cd $HOME/esp/esp-matter
+git submodule update --init --depth 1
+cd connectedhomeip/connectedhomeip
+./scripts/checkout_submodules.py --platform esp32 darwin --shallow
+cd ../..
+./install.sh
+```
+
+```bash
+. $HOME/esp/esp-idf/export.sh
+. $HOME/esp/esp-matter/export.sh
+cd /path/to/esp32-pc-controller
+export ESP_MATTER_PATH=$HOME/esp/esp-matter
+idf.py build
+idf.py -p /dev/cu.usbmodem* flash
+```
+
+3. Open `http://waketype.local/settings` → **Google Home (Matter)**.
+4. Phone: Google Home → **Add** → **Matter-enabled device** → **Set up without QR** → type the **manual pairing code**. Bluetooth on. Stand near the ESP32.
+5. “Turn on WakeType PC” / “Turn off …” runs a **short power button**. If the PC is already on, “turn on” does nothing. Reset and long-hold are **not** in Google Home.
+
+**Open pairing for 15 minutes** if Home cannot find it. Leave the optocoupler jumper off so PC state stays accurate.
+
+Test vendor IDs (`0xFFF1`) work for development. Shipping products need CSA certification.
+
 ## Dry-test relays (before motherboard wiring)
 
 With the board powered over USB only (relays **not** wired to the PC yet):
@@ -112,7 +149,7 @@ Do **not** connect COM/NO to motherboard headers until hundreds of dry cycles lo
 ## Deferred
 
 - Neighbor browse / WebSocket status push
-- Real Matter (Google Home) and real USB HID
+- Real USB HID
 - Custom phone/server apps (use the API)
 
 ## License
