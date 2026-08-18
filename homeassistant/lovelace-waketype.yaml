@@ -1,0 +1,16 @@
+# Paste as a dashboard view (Settings → Dashboards → three dots → Raw configuration)
+# or add the card under an existing Bedroom view.
+
+title: Bedroom PC
+path: bedroom-pc
+icon: mdi:desktop-classic
+cards:
+  - type: entities
+    title: Bedroom PC
+    state_color: true
+    entities:
+      - entity: binary_sensor.bedroom_pc
+        name: PC
+      - entity: button.press_pc_power
+      - entity: button.reset_the_pc
+      - entity: button.force_shut_down

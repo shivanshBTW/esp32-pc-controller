@@ -1,0 +1,75 @@
+# WakeType LAN HTTP — buttons + PC on/off (not the Matter switch).
+# Drop this file in /config/packages/waketype.yaml
+# and add to configuration.yaml if you do not already use packages:
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Then merge secrets.yaml.example into /config/secrets.yaml and restart.
+
+rest:
+  - resource: http://192.168.1.231/api/v1/status
+    scan_interval: 5
+    timeout: 8
+    headers:
+      Authorization: !secret waketype_bearer
+    binary_sensor:
+      - name: Bedroom PC
+        unique_id: waketype_bedroom_pc_power
+        device_class: power
+        value_template: "{{ value_json.pc_state == 'ON' }}"
+
+rest_command:
+  waketype_power_press:
+    url: http://192.168.1.231/api/v1/pc/power
+    method: POST
+    timeout: 15
+    headers:
+      Authorization: !secret waketype_bearer
+      Content-Type: application/json
+    payload: "{}"
+
+  waketype_reset:
+    url: http://192.168.1.231/api/v1/pc/reset
+    method: POST
+    timeout: 15
+    headers:
+      Authorization: !secret waketype_bearer
+      Content-Type: application/json
+    payload: "{}"
+
+  waketype_power_hold:
+    url: http://192.168.1.231/api/v1/pc/power/hold
+    method: POST
+    timeout: 20
+    headers:
+      Authorization: !secret waketype_bearer
+      Content-Type: application/json
+    payload: '{"duration_ms": 0}'
+
+template:
+  - binary_sensor:
+      - name: PC power
+        unique_id: waketype_pc_power_opening
+        device_class: opening
+        availability: "{{ has_value('binary_sensor.bedroom_pc') }}"
+        state: "{{ is_state('binary_sensor.bedroom_pc', 'on') }}"
+
+  - button:
+      - name: Press PC power
+        unique_id: waketype_press_pc_power
+        icon: mdi:power
+        press:
+          - action: rest_command.waketype_power_press
+
+      - name: Reset the PC
+        unique_id: waketype_reset_the_pc
+        icon: mdi:restart
+        press:
+          - action: rest_command.waketype_reset
+
+      - name: Force shut down
+        unique_id: waketype_force_shut_down
+        icon: mdi:power-cycle
+        press:
+          - action: rest_command.waketype_power_hold

@@ -1,0 +1,37 @@
+# Replace the google_assistant: mapping in configuration.yaml with:
+#
+#   google_assistant: !include google_assistant.yaml
+#
+# Buttons become Google scenes. The opening sensor is the PC-on tile
+# (open = on). Matter On/Off and Identify stay out of Google.
+
+project_id: ha-shivansh
+service_account: !include SERVICE_ACCOUNT.json
+report_state: true
+expose_by_default: true
+exposed_domains:
+  - switch
+  - light
+entity_config:
+  switch.bedroom_pc_switch:
+    expose: false
+  button.bedroom_pc_switch_identify:
+    expose: false
+  button.press_pc_power:
+    expose: true
+    name: Press PC power
+    room: Bedroom
+  button.reset_the_pc:
+    expose: true
+    name: Reset the PC
+    room: Bedroom
+  button.force_shut_down:
+    expose: true
+    name: Force shut down
+    room: Bedroom
+  binary_sensor.pc_power:
+    expose: true
+    name: PC power
+    room: Bedroom
+  binary_sensor.bedroom_pc:
+    expose: false

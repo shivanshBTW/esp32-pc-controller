@@ -18,6 +18,7 @@ main/secrets.h
 .env
 *.pem
 *.key
+homeassistant/secrets.yaml
 
 # Python
 __pycache__/

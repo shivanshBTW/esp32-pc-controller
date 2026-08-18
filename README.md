@@ -96,6 +96,38 @@ Web UI pages: `/` (status + controls + Wi‑Fi), `/settings`, `/ota`.
 
 mDNS: `waketype.local`, service `_waketype._tcp`.
 
+## Home Assistant / Google Assistant (no Nest hub)
+
+YAML in [`homeassistant/`](homeassistant/) talks to this API over the LAN. Matter is not used.
+
+On the Ubuntu host (the folder that already has `compose.yaml` and `config/`):
+
+```bash
+# from this repo, on the Mac
+./homeassistant/sync_secrets.sh
+
+# on the HA machine, from the homeassistant/ directory that contains compose.yaml
+mkdir -p config/packages
+# copy packages/waketype.yaml, google_assistant.yaml, and secrets.yaml into config/
+```
+
+In `config/configuration.yaml`, add `packages` under the existing `homeassistant:` block (do not add a second `homeassistant:` key):
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
+
+Replace the existing `google_assistant:` mapping with:
+
+```yaml
+google_assistant: !include google_assistant.yaml
+```
+
+Merge `waketype_bearer` into `config/secrets.yaml` (do not commit it). Restart HA, then say **“Hey Google, sync my devices.”**
+
+Dashboard buttons: **Press PC power**, **Reset the PC**, **Force shut down**, plus **Bedroom PC** (on/off). Google: those buttons as scenes, **PC power** as an open/closed tile, Matter `switch.bedroom_pc_switch` hidden.
+
 ## Matter / Google Home
 
 Needs a **Google Matter controller** on the same Wi‑Fi (Nest Hub, Nest Mini 2nd gen, Pixel Tablet, Google TV, etc.). The phone app alone is not enough.
