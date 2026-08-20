@@ -44,12 +44,17 @@ rest_command:
     payload: '{"duration_ms": 0}'
 
 template:
-  - binary_sensor:
+  - cover:
       - name: PC power
-        unique_id: waketype_pc_power_opening
-        device_class: opening
-        availability: "{{ has_value('binary_sensor.bedroom_pc') }}"
-        state: "{{ is_state('binary_sensor.bedroom_pc', 'on') }}"
+        unique_id: waketype_pc_power_cover
+        device_class: door
+        state: "{{ 'open' if is_state('binary_sensor.bedroom_pc', 'on') else 'closed' }}"
+        open_cover:
+          - delay:
+              milliseconds: 1
+        close_cover:
+          - delay:
+              milliseconds: 1
 
   - button:
       - name: Press PC power
