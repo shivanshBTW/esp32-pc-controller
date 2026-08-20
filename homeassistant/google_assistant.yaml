@@ -8,9 +8,6 @@ exposed_domains:
   - switch
   - light
 entity_config:
-  input_boolean.pc_controls:
-    expose: true
-    room: Bedroom
   script.google_press_pc_power:
     expose: true
     room: Bedroom

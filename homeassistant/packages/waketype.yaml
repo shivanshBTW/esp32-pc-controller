@@ -1,6 +1,4 @@
 # /config/packages/waketype.yaml  — the only file that belongs in packages/
-#
-# Dashboard buttons: ungated. Google scenes: PC controls on, then 1 minute.
 
 rest:
   - resource: http://192.168.1.231/api/v1/status
@@ -42,15 +40,6 @@ rest_command:
       Content-Type: application/json
     payload: '{"duration_ms": 0}'
 
-input_boolean:
-  pc_controls:
-    name: PC controls
-    icon: mdi:shield-key
-
-timer:
-  pc_controls:
-    duration: "00:01:00"
-
 template:
   - binary_sensor:
       - name: PC power
@@ -83,84 +72,16 @@ script:
     alias: Press PC power
     icon: mdi:power
     sequence:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.pc_controls
-                state: "on"
-            sequence:
-              - service: rest_command.waketype_power_press
-        default:
-          - service: persistent_notification.create
-            data:
-              title: WakeType
-              message: Turn on PC controls first. You then have 1 minute.
+      - service: rest_command.waketype_power_press
 
   google_reset_the_pc:
     alias: Reset the PC
     icon: mdi:restart
     sequence:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.pc_controls
-                state: "on"
-            sequence:
-              - service: rest_command.waketype_reset
-        default:
-          - service: persistent_notification.create
-            data:
-              title: WakeType
-              message: Turn on PC controls first. You then have 1 minute.
+      - service: rest_command.waketype_reset
 
   google_force_shut_down:
     alias: Force shut down
     icon: mdi:power-cycle
     sequence:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.pc_controls
-                state: "on"
-            sequence:
-              - service: rest_command.waketype_power_hold
-        default:
-          - service: persistent_notification.create
-            data:
-              title: WakeType
-              message: Turn on PC controls first. You then have 1 minute.
-
-automation:
-  - id: waketype_pc_controls_on
-    alias: WakeType PC controls session start
-    trigger:
-      - platform: state
-        entity_id: input_boolean.pc_controls
-        to: "on"
-    action:
-      - service: timer.start
-        target:
-          entity_id: timer.pc_controls
-
-  - id: waketype_pc_controls_off
-    alias: WakeType PC controls session end
-    trigger:
-      - platform: state
-        entity_id: input_boolean.pc_controls
-        to: "off"
-    action:
-      - service: timer.cancel
-        target:
-          entity_id: timer.pc_controls
-
-  - id: waketype_pc_controls_timeout
-    alias: WakeType PC controls auto lock
-    trigger:
-      - platform: event
-        event_type: timer.finished
-        event_data:
-          entity_id: timer.pc_controls
-    action:
-      - service: input_boolean.turn_off
-        target:
-          entity_id: input_boolean.pc_controls
+      - service: rest_command.waketype_power_hold
