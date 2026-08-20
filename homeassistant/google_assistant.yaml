@@ -1,4 +1,7 @@
 # google_assistant: !include google_assistant.yaml
+#
+# Google routines must "turn on" these switches. Do not use the PC power
+# open/closed sensor in a routine — it is read-only.
 
 project_id: ha-shivansh
 service_account: !include SERVICE_ACCOUNT.json
@@ -8,15 +11,18 @@ exposed_domains:
   - switch
   - light
 entity_config:
-  script.google_press_pc_power:
-    expose: true
+  switch.press_pc_power:
     room: Bedroom
-  script.google_reset_the_pc:
-    expose: true
+  switch.reset_the_pc:
     room: Bedroom
-  script.google_force_shut_down:
-    expose: true
+  switch.force_shut_down:
     room: Bedroom
   binary_sensor.pc_power:
     expose: true
     room: Bedroom
+  script.google_press_pc_power:
+    expose: false
+  script.google_reset_the_pc:
+    expose: false
+  script.google_force_shut_down:
+    expose: false

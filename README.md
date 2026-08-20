@@ -127,7 +127,7 @@ google_assistant: !include google_assistant.yaml
 
 Merge `waketype_bearer` into `config/secrets.yaml` (do not commit it). Restart HA, then say **“Hey Google, sync my devices.”**
 
-Dashboard and Google use the same three actions: **Press PC power**, **Reset the PC**, **Force shut down**. Google shows them as scenes. **PC power** is an open/closed tile.
+HA dashboard uses buttons. Google Home uses momentary switches (**Press PC power**, **Reset the PC**, **Force shut down**) so routines can **turn on** them. **PC power** is a read-only open/closed tile — do not put it in a routine.
 
 ## Dry-test relays (before motherboard wiring)
 

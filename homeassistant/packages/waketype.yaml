@@ -1,4 +1,7 @@
 # /config/packages/waketype.yaml  — the only file that belongs in packages/
+#
+# HA dashboard: template buttons. Google Home: momentary switches (routines
+# can "turn on" a switch; they often ignore HA scripts/scenes).
 
 rest:
   - resource: http://192.168.1.231/api/v1/status
@@ -67,21 +70,48 @@ template:
         press:
           - service: rest_command.waketype_power_hold
 
-script:
-  google_press_pc_power:
-    alias: Press PC power
-    icon: mdi:power
-    sequence:
-      - service: rest_command.waketype_power_press
+  - switch:
+      - name: Press PC power
+        unique_id: waketype_switch_press_pc_power
+        icon: mdi:power
+        optimistic: true
+        turn_on:
+          - service: rest_command.waketype_power_press
+          - delay:
+              seconds: 1
+          - service: switch.turn_off
+            target:
+              entity_id: switch.press_pc_power
+        turn_off:
+          - delay:
+              milliseconds: 1
 
-  google_reset_the_pc:
-    alias: Reset the PC
-    icon: mdi:restart
-    sequence:
-      - service: rest_command.waketype_reset
+      - name: Reset the PC
+        unique_id: waketype_switch_reset_the_pc
+        icon: mdi:restart
+        optimistic: true
+        turn_on:
+          - service: rest_command.waketype_reset
+          - delay:
+              seconds: 1
+          - service: switch.turn_off
+            target:
+              entity_id: switch.reset_the_pc
+        turn_off:
+          - delay:
+              milliseconds: 1
 
-  google_force_shut_down:
-    alias: Force shut down
-    icon: mdi:power-cycle
-    sequence:
-      - service: rest_command.waketype_power_hold
+      - name: Force shut down
+        unique_id: waketype_switch_force_shut_down
+        icon: mdi:power-cycle
+        optimistic: true
+        turn_on:
+          - service: rest_command.waketype_power_hold
+          - delay:
+              seconds: 1
+          - service: switch.turn_off
+            target:
+              entity_id: switch.force_shut_down
+        turn_off:
+          - delay:
+              milliseconds: 1
