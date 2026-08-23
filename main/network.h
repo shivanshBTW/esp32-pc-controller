@@ -26,6 +26,14 @@ bool network_is_sta_connected(void);
 bool network_is_ap_active(void);
 /** True when SoftAP setup portal should accept unauthenticated Wi‑Fi config. */
 bool network_is_setup_mode(void);
+/** Saved home SSID exists in NVS (password may still be empty). */
+bool network_has_saved_sta(void);
+/** Setup UI is polling — pause background STA retries. */
+bool network_setup_page_open(void);
+/** Call from HTTP handlers while the setup portal is in use. */
+void network_note_setup_activity(void);
+/** Rejoin saved SSID/password without wiping SoftAP until GOT_IP. */
+esp_err_t network_retry_saved_sta(void);
 
 const char *network_ip_string(void);
 const char *network_mode_string(void);

@@ -1,5 +1,6 @@
 #include "web_ui.h"
 #include "configuration.h"
+#include "network.h"
 
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -85,6 +86,7 @@ static const char *PAGE_SHELL_FOOT =
 
 static esp_err_t send_html(httpd_req_t *req, const char *body)
 {
+    network_note_setup_activity();
     httpd_resp_set_type(req, "text/html");
     httpd_resp_sendstr_chunk(req, PAGE_SHELL_HEAD);
     httpd_resp_sendstr_chunk(req, body);
@@ -107,6 +109,10 @@ static esp_err_t handle_home(httpd_req_t *req)
         "<div class=row style=\"margin-top:.5rem\">"
         "<button class=secondary onclick=\"refresh()\">Refresh</button>"
         "<a href=/settings style=\"flex:1\"><button class=secondary style=\"width:100%\">Wi‑Fi &amp; settings</button></a>"
+        "</div>"
+        "<div id=retryBox style=display:none;margin-top:.75rem>"
+        "<button type=button onclick=\"retryWifi()\">Retry home Wi‑Fi</button>"
+        "<small>Uses the saved network. You do not need to type the password again.</small>"
         "</div>"
         "</section>"
         "<section>"
@@ -139,10 +145,18 @@ static esp_err_t handle_home(httpd_req_t *req)
         "      ['Signal', j.rssi!=null?(j.rssi+' dBm'):'—'],"
         "      ['Firmware', j.firmware]"
         "    ]);"
+        "    const retry=document.getElementById('retryBox');"
+        "    if(retry) retry.style.display=(j.setup_mode&&(j.saved_wifi||j.wifi_ssid))?'block':'none';"
         "    if(j.setup_mode) banner('authBanner','Setup mode: join this hotspot, then open Settings to pick your home Wi‑Fi.','warn');"
         "  }catch(e){"
         "    banner('authBanner', e.message||'Need device key — open Settings.','bad');"
         "  }"
+        "}"
+        "async function retryWifi(){"
+        "  try{banner('authBanner','Retrying saved Wi‑Fi…','warn');"
+        "    const j=await api('/api/v1/wifi/retry',{method:'POST'});"
+        "    banner('authBanner', j.ok?'Trying saved network. If it joins, this hotspot will close.':'Retry failed: '+(j.error||''), j.ok?'ok':'bad');}"
+        "  catch(e){banner('authBanner', e.message,'bad');}"
         "}"
         "async function pc(path,body){"
         "  try{const j=await api(path,{method:'POST',body:body?JSON.stringify(body):'{}'});"
@@ -185,6 +199,11 @@ static esp_err_t handle_settings(httpd_req_t *req)
         "<section>"
         "<h2>Wi‑Fi</h2>"
         "<dl id=wifiDl></dl>"
+        "<div id=retryBox style=display:none;margin-top:.75rem>"
+        "<button type=button onclick=\"retryWifi()\">Retry home Wi‑Fi</button>"
+        "<small>Uses the saved network. You do not need to type the password again.</small>"
+        "<div id=retryMsg class=banner style=display:none></div>"
+        "</div>"
         "<h2 style=\"margin-top:1.1rem\">Change network</h2>"
         "<div class=row>"
         "<button class=secondary type=button onclick=\"scan()\">Scan networks</button>"
@@ -280,6 +299,20 @@ static esp_err_t handle_settings(httpd_req_t *req)
         "    banner('authBanner', e.message,'bad');"
         "  }"
         "}"
+        "async function pollSetup(){"
+        "  try{"
+        "    const j=await api('/api/v1/status');"
+        "    const box=document.getElementById('retryBox');"
+        "    if(box) box.style.display=(j.setup_mode&&(j.saved_wifi||j.wifi_ssid))?'block':'none';"
+        "    if(j.wifi_connected){banner('retryMsg','Joined Wi‑Fi. Open http://waketype.local/settings','ok');}"
+        "  }catch(e){}"
+        "}"
+        "async function retryWifi(){"
+        "  try{banner('retryMsg','Retrying saved Wi‑Fi…','warn');"
+        "    const j=await api('/api/v1/wifi/retry',{method:'POST'});"
+        "    banner('retryMsg', j.ok?'Trying saved network. If it joins, this hotspot will close.':'Retry failed: '+(j.error||''), j.ok?'ok':'bad');}"
+        "  catch(e){banner('retryMsg', e.message,'bad');}"
+        "}"
         "async function scan(){"
         "  try{"
         "    banner('wifiMsg','Scanning…','warn');"
@@ -330,6 +363,7 @@ static esp_err_t handle_settings(httpd_req_t *req)
         "  await api('/api/v1/config',{method:'POST',body:JSON.stringify(body)}); banner('cfgMsg','Restored','ok'); load();}"
         "  catch(e){banner('cfgMsg',e.message,'bad');}}"
         "load();"
+        "(async()=>{try{const j=await api('/api/v1/status'); if(j.setup_mode){pollSetup(); setInterval(pollSetup,2000);}}catch(e){}})();"
         "</script>");
 }
 

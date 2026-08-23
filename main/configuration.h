@@ -30,6 +30,8 @@ extern "C" {
 #define RELAY_WATCHDOG_MS         (MAX_RELAY_HOLD_MS + 500)
 
 #define WIFI_STA_FAIL_BEFORE_AP   10
+#define WIFI_STA_RETRY_WHILE_AP_MS 30000
+#define WIFI_SETUP_PAGE_OPEN_MS   8000
 #define PC_STATE_ACTIVE_LEVEL     0
 #define PC_STATE_SAMPLE_MS        50
 #define PC_STATE_STEADY_MS        1500

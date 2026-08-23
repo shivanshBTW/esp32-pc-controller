@@ -7,6 +7,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -31,6 +32,81 @@ static int s_retry;
 static char s_ip[16] = "0.0.0.0";
 static char s_ip6[48];
 static int s_rssi;
+static esp_timer_handle_t s_sta_retry_timer;
+static int64_t s_setup_activity_us;
+
+static bool has_saved_ssid(void)
+{
+    const char *ssid = nvs_prefs_get()->wifi_ssid;
+    return ssid && ssid[0] != '\0';
+}
+
+static bool setup_page_open(void)
+{
+    if (s_setup_activity_us <= 0) {
+        return false;
+    }
+    return (esp_timer_get_time() - s_setup_activity_us) <
+           ((int64_t)WIFI_SETUP_PAGE_OPEN_MS * 1000);
+}
+
+static void stop_sta_retry_timer(void)
+{
+    if (s_sta_retry_timer) {
+        esp_timer_stop(s_sta_retry_timer);
+    }
+}
+
+static void sta_retry_timer_cb(void *arg)
+{
+    (void)arg;
+    if (s_sta_connected || !s_want_sta || !has_saved_ssid()) {
+        if (s_sta_connected) {
+            stop_sta_retry_timer();
+        }
+        return;
+    }
+    if (setup_page_open()) {
+        ESP_LOGI(TAG, "STA retry skipped — setup page open");
+        return;
+    }
+    ESP_LOGI(TAG, "STA retry saved '%s'", nvs_prefs_get()->wifi_ssid);
+    esp_wifi_connect();
+}
+
+static void start_sta_retry_timer(void)
+{
+    if (!has_saved_ssid()) {
+        return;
+    }
+    if (!s_sta_retry_timer) {
+        const esp_timer_create_args_t args = {
+            .callback = &sta_retry_timer_cb,
+            .name = "sta_retry",
+        };
+        if (esp_timer_create(&args, &s_sta_retry_timer) != ESP_OK) {
+            ESP_LOGE(TAG, "STA retry timer create failed");
+            return;
+        }
+    }
+    esp_timer_stop(s_sta_retry_timer);
+    esp_err_t err = esp_timer_start_periodic(s_sta_retry_timer,
+                                             (uint64_t)WIFI_STA_RETRY_WHILE_AP_MS * 1000ULL);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "STA retry timer: %s", esp_err_to_name(err));
+    }
+}
+
+static void leave_ap_for_sta(void)
+{
+    stop_sta_retry_timer();
+    captive_dns_stop();
+    s_ap_active = false;
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "set_mode STA: %s", esp_err_to_name(err));
+    }
+}
 
 static void apply_hostname(void)
 {
@@ -131,6 +207,10 @@ static esp_err_t start_ap(void)
     ap.ap.max_connection = 4;
     ap.ap.authmode = WIFI_AUTH_OPEN;
 
+    s_ap_active = true;
+    s_sta_connected = false;
+    s_want_sta = has_saved_ssid();
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     {
@@ -139,11 +219,8 @@ static esp_err_t start_ap(void)
             return start;
         }
     }
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
-    s_ap_active = true;
-    s_want_sta = false;
-    s_sta_connected = false;
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
     strncpy(s_ip, "192.168.4.1", sizeof(s_ip) - 1);
 
     esp_netif_ip_info_t ip_info;
@@ -154,12 +231,19 @@ static esp_err_t start_ap(void)
         captive_dns_start(esp_netif_htonl(ESP_IP4TOADDR(192, 168, 4, 1)));
     }
 
-    ESP_LOGW(TAG, "SoftAP '%s' at http://%s — configure Wi‑Fi", AP_SSID_DEFAULT, s_ip);
+    if (s_want_sta) {
+        start_sta_retry_timer();
+        ESP_LOGW(TAG, "SoftAP '%s' at http://%s — will retry saved Wi‑Fi every %d s",
+                 AP_SSID_DEFAULT, s_ip, WIFI_STA_RETRY_WHILE_AP_MS / 1000);
+    } else {
+        ESP_LOGW(TAG, "SoftAP '%s' at http://%s — configure Wi‑Fi", AP_SSID_DEFAULT, s_ip);
+    }
     return ESP_OK;
 }
 
 static esp_err_t start_sta(const char *ssid, const char *password)
 {
+    stop_sta_retry_timer();
     captive_dns_stop();
     s_ap_active = false;
     s_want_sta = true;
@@ -197,12 +281,15 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
     (void)base;
     (void)data;
     if (id == WIFI_EVENT_STA_START) {
-        if (s_want_sta) {
+        if (s_want_sta && !s_ap_active) {
             esp_wifi_connect();
         }
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
         s_sta_connected = false;
         if (!s_want_sta) {
+            return;
+        }
+        if (s_ap_active) {
             return;
         }
         if (s_retry < WIFI_STA_FAIL_BEFORE_AP) {
@@ -236,7 +323,7 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&event->ip_info.ip));
     s_retry = 0;
     s_sta_connected = true;
-    s_ap_active = false;
+    leave_ap_for_sta();
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
         s_rssi = ap.rssi;
@@ -368,6 +455,53 @@ bool network_is_setup_mode(void)
     return s_ap_active && !s_sta_connected;
 }
 
+bool network_has_saved_sta(void)
+{
+    return has_saved_ssid();
+}
+
+bool network_setup_page_open(void)
+{
+    return setup_page_open();
+}
+
+void network_note_setup_activity(void)
+{
+    if (network_is_setup_mode()) {
+        s_setup_activity_us = esp_timer_get_time();
+    }
+}
+
+esp_err_t network_retry_saved_sta(void)
+{
+    if (!has_saved_ssid()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const waketype_settings_t *s = nvs_prefs_get();
+    s_want_sta = true;
+    s_retry = 0;
+
+    wifi_config_t sta = {0};
+    strncpy((char *)sta.sta.ssid, s->wifi_ssid, sizeof(sta.sta.ssid) - 1);
+    if (s->wifi_password[0]) {
+        strncpy((char *)sta.sta.password, s->wifi_password, sizeof(sta.sta.password) - 1);
+    }
+    sta.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+
+    apply_hostname();
+    if (s_ap_active) {
+        esp_err_t mode = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (mode != ESP_OK && mode != ESP_ERR_INVALID_STATE) {
+            return mode;
+        }
+    }
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    apply_static_or_dhcp();
+    ESP_LOGI(TAG, "Manual STA retry '%s'", s->wifi_ssid);
+    return esp_wifi_connect();
+}
+
 const char *network_ip_string(void)
 {
     return s_ip;
@@ -474,6 +608,7 @@ esp_err_t network_save_and_connect(const char *ssid, const char *password)
 
     s_retry = 0;
     s_want_sta = true;
+    stop_sta_retry_timer();
     captive_dns_stop();
 
     wifi_config_t sta = {0};

@@ -118,6 +118,7 @@ static esp_err_t handle_status(httpd_req_t *req)
     if (!setup && !authorize(req)) {
         return reject_unauthorized(req);
     }
+    network_note_setup_activity();
 
     const waketype_settings_t *s = nvs_prefs_get();
     cJSON *root = cJSON_CreateObject();
@@ -134,6 +135,7 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddStringToObject(root, "wifi_mode", network_mode_string());
     cJSON_AddBoolToObject(root, "wifi_connected", network_is_sta_connected());
     cJSON_AddBoolToObject(root, "setup_mode", setup);
+    cJSON_AddBoolToObject(root, "saved_wifi", network_has_saved_sta());
     cJSON_AddStringToObject(root, "wifi_ssid", network_sta_ssid());
     cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
     cJSON_AddStringToObject(root, "ip", ipinfo.ip[0] ? ipinfo.ip : network_ip_string());
@@ -171,6 +173,7 @@ static esp_err_t handle_wifi_scan(httpd_req_t *req)
     if (!authorize_or_setup(req)) {
         return reject_unauthorized(req);
     }
+    network_note_setup_activity();
     wifi_scan_ap_t *list = NULL;
     size_t count = 0;
     esp_err_t err = network_scan(&list, &count);
@@ -195,6 +198,7 @@ static esp_err_t handle_wifi_connect(httpd_req_t *req)
     if (!authorize_or_setup(req)) {
         return reject_unauthorized(req);
     }
+    network_note_setup_activity();
     char buf[256];
     if (recv_body(req, buf, sizeof(buf)) <= 0) {
         httpd_resp_set_status(req, "400 Bad Request");
@@ -226,12 +230,22 @@ static esp_err_t handle_wifi_connect(httpd_req_t *req)
     return send_json(req, root);
 }
 
+static esp_err_t handle_wifi_retry(httpd_req_t *req)
+{
+    if (!authorize_or_setup(req)) {
+        return reject_unauthorized(req);
+    }
+    network_note_setup_activity();
+    return send_result(req, network_retry_saved_sta());
+}
+
 static esp_err_t handle_settings_get(httpd_req_t *req)
 {
     /* Setup SoftAP: allow read for captive UI. STA: require bearer token. */
     if (!network_is_setup_mode() && !authorize(req)) {
         return reject_unauthorized(req);
     }
+    network_note_setup_activity();
 
     const waketype_settings_t *s = nvs_prefs_get();
     network_ip_info_t live;
@@ -659,6 +673,7 @@ esp_err_t local_api_start(void)
         {.uri = "/api/v1/status", .method = HTTP_GET, .handler = handle_status},
         {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = handle_wifi_scan},
         {.uri = "/api/v1/wifi/connect", .method = HTTP_POST, .handler = handle_wifi_connect},
+        {.uri = "/api/v1/wifi/retry", .method = HTTP_POST, .handler = handle_wifi_retry},
         {.uri = "/api/v1/settings", .method = HTTP_GET, .handler = handle_settings_get},
         {.uri = "/api/v1/settings", .method = HTTP_POST, .handler = handle_settings_post},
         {.uri = "/api/v1/config", .method = HTTP_GET, .handler = handle_config_get},
