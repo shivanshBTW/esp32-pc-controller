@@ -408,7 +408,7 @@ static esp_err_t handle_captive_redirect(httpd_req_t *req)
     /* Saved home Wi‑Fi: look like an open network so iOS/Android do not
      * auto-open the setup page (that would pause background STA retry). */
     if (network_has_saved_sta()) {
-        if (req->uri && strstr(req->uri, "generate_204")) {
+        if (strstr(req->uri, "generate_204")) {
             httpd_resp_set_status(req, "204 No Content");
             return httpd_resp_send(req, NULL, 0);
         }
