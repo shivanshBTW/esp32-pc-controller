@@ -57,7 +57,7 @@ On `http://waketype.local/settings`, paste the **same** password under Device ke
 4. Scan → pick home Wi‑Fi → Connect.
 5. On LAN open `http://waketype.local/settings`, paste the same device key, Save.
 
-If STA Wi‑Fi fails repeatedly, SoftAP opens again for recovery (important once the board is sealed in a PC). Saved credentials are kept: the board retries home Wi‑Fi every 30 seconds unless the setup page is open, in which case use **Retry home Wi‑Fi**.
+If STA Wi‑Fi fails repeatedly, SoftAP opens again for recovery (important once the board is sealed in a PC). Saved credentials are kept: the board retries home Wi‑Fi every 30 seconds unless the setup page is open, in which case use **Retry home Wi‑Fi**. After a network is saved, phones will not auto-open the setup page; use `http://192.168.4.1` if you need it.
 
 ## Build / flash
 

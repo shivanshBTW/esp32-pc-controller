@@ -224,11 +224,18 @@ static esp_err_t start_ap(void)
     strncpy(s_ip, "192.168.4.1", sizeof(s_ip) - 1);
 
     esp_netif_ip_info_t ip_info;
+    uint32_t ap_ip_be = esp_netif_htonl(ESP_IP4TOADDR(192, 168, 4, 1));
     if (s_ap_netif && esp_netif_get_ip_info(s_ap_netif, &ip_info) == ESP_OK) {
-        captive_dns_start(ip_info.ip.addr);
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&ip_info.ip));
+        ap_ip_be = ip_info.ip.addr;
+    }
+    /* First boot only: hijack DNS so phones open the setup page.
+     * After a saved network exists, skip that so a router reboot does not
+     * pop the portal and pause STA retry. Open http://192.168.4.1 by hand. */
+    if (!has_saved_ssid()) {
+        captive_dns_start(ap_ip_be);
     } else {
-        captive_dns_start(esp_netif_htonl(ESP_IP4TOADDR(192, 168, 4, 1)));
+        captive_dns_stop();
     }
 
     if (s_want_sta) {

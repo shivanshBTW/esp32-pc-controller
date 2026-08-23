@@ -5,6 +5,8 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 
+#include <string.h>
+
 static const char *TAG = "webui";
 
 static const char *PAGE_SHELL_HEAD =
@@ -403,6 +405,16 @@ static esp_err_t handle_ota_page(httpd_req_t *req)
 
 static esp_err_t handle_captive_redirect(httpd_req_t *req)
 {
+    /* Saved home Wi‑Fi: look like an open network so iOS/Android do not
+     * auto-open the setup page (that would pause background STA retry). */
+    if (network_has_saved_sta()) {
+        if (req->uri && strstr(req->uri, "generate_204")) {
+            httpd_resp_set_status(req, "204 No Content");
+            return httpd_resp_send(req, NULL, 0);
+        }
+        httpd_resp_set_type(req, "text/html");
+        return httpd_resp_sendstr(req, "Success");
+    }
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/settings");
     return httpd_resp_send(req, NULL, 0);
@@ -415,8 +427,12 @@ esp_err_t web_ui_register(httpd_handle_t server)
         {.uri = "/settings", .method = HTTP_GET, .handler = handle_settings},
         {.uri = "/ota", .method = HTTP_GET, .handler = handle_ota_page},
         {.uri = "/generate_204", .method = HTTP_GET, .handler = handle_captive_redirect},
+        {.uri = "/gen_204", .method = HTTP_GET, .handler = handle_captive_redirect},
         {.uri = "/hotspot-detect.html", .method = HTTP_GET, .handler = handle_captive_redirect},
         {.uri = "/canonical.html", .method = HTTP_GET, .handler = handle_captive_redirect},
+        {.uri = "/success.txt", .method = HTTP_GET, .handler = handle_captive_redirect},
+        {.uri = "/connecttest.txt", .method = HTTP_GET, .handler = handle_captive_redirect},
+        {.uri = "/ncsi.txt", .method = HTTP_GET, .handler = handle_captive_redirect},
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         httpd_register_uri_handler(server, &routes[i]);
