@@ -4,7 +4,7 @@
 # can "turn on" a switch; they often ignore HA scripts/scenes).
 
 rest:
-  - resource: http://192.168.1.231/api/v1/status
+  - resource: http://192.168.0.232/api/v1/status
     scan_interval: 5
     timeout: 8
     headers:
@@ -17,25 +17,25 @@ rest:
 
 rest_command:
   waketype_power_press:
-    url: http://192.168.1.231/api/v1/pc/power
+    url: http://192.168.0.232/api/v1/pc/power
     method: POST
     timeout: 15
     headers:
       Authorization: !secret waketype_bearer
       Content-Type: application/json
-    payload: "{}"
+    payload: '{}'
 
   waketype_reset:
-    url: http://192.168.1.231/api/v1/pc/reset
+    url: http://192.168.0.232/api/v1/pc/reset
     method: POST
     timeout: 15
     headers:
       Authorization: !secret waketype_bearer
       Content-Type: application/json
-    payload: "{}"
+    payload: '{}'
 
   waketype_power_hold:
-    url: http://192.168.1.231/api/v1/pc/power/hold
+    url: http://192.168.0.232/api/v1/pc/power/hold
     method: POST
     timeout: 20
     headers:
