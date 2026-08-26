@@ -6,6 +6,7 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -538,6 +539,20 @@ const char *network_sta_ssid(void)
         }
     }
     return nvs_prefs_get()->wifi_ssid;
+}
+
+const char *network_mac_string(void)
+{
+    static char mac_str[18];
+    uint8_t mac[6] = {0};
+    if (esp_wifi_get_mac(WIFI_IF_STA, mac) != ESP_OK) {
+        if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+            return "";
+        }
+    }
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return mac_str;
 }
 
 void network_get_ip_info(network_ip_info_t *out)

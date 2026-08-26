@@ -137,6 +137,7 @@ static esp_err_t handle_status(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "setup_mode", setup);
     cJSON_AddBoolToObject(root, "saved_wifi", network_has_saved_sta());
     cJSON_AddStringToObject(root, "wifi_ssid", network_sta_ssid());
+    cJSON_AddStringToObject(root, "wifi_mac", network_mac_string());
     cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
     cJSON_AddStringToObject(root, "ip", ipinfo.ip[0] ? ipinfo.ip : network_ip_string());
     cJSON_AddStringToObject(root, "ipv6", network_ipv6_linklocal());
@@ -254,6 +255,7 @@ static esp_err_t handle_settings_get(httpd_req_t *req)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "hostname", s->hostname);
     cJSON_AddStringToObject(root, "wifi_ssid", network_sta_ssid());
+    cJSON_AddStringToObject(root, "wifi_mac", network_mac_string());
     cJSON_AddBoolToObject(root, "wifi_password_set", s->wifi_password[0] != '\0');
     cJSON_AddBoolToObject(root, "wifi_connected", network_is_sta_connected());
     cJSON_AddStringToObject(root, "wifi_mode", network_mode_string());

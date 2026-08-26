@@ -39,6 +39,8 @@ const char *network_ip_string(void);
 const char *network_mode_string(void);
 /** Configured / currently associated STA SSID (empty if none). */
 const char *network_sta_ssid(void);
+/** ESP32 Wi‑Fi STA MAC, `aa:bb:cc:dd:ee:ff`, or empty. */
+const char *network_mac_string(void);
 int network_rssi(void);
 
 /** STA netif, or NULL. */
